@@ -95,8 +95,10 @@ The tests run against a live backend. If **any** endpoint in the controller is m
            String uniqueEmail = uniqueUser + "@example.com";
 
            // Register test user — always succeeds because the username is unique
+           // IMPORTANT: include ALL required fields from the signup DTO (check the endpoint description for field list)
+           // Example with name+username+email+password — adapt to the actual DTO fields:
            given().contentType(ContentType.JSON)
-                  .body("{\"username\":\"" + uniqueUser + "\",\"email\":\"" + uniqueEmail + "\",\"password\":\"Test1234!\"}")
+                  .body("{\"name\":\"Test User\",\"username\":\"" + uniqueUser + "\",\"email\":\"" + uniqueEmail + "\",\"password\":\"Test1234!\"}")
                   .post("/api/auth/signup");
 
            // Sign in and capture token — use the field name from the response (commonly "token" or "accessToken")
@@ -108,6 +110,7 @@ The tests run against a live backend. If **any** endpoint in the controller is m
        }
    ```
    **IMPORTANT**: Always use raw JSON strings in `@BeforeAll` (as shown above) — never use DTO factory methods for auth setup. Raw JSON avoids enum/validation surprises (e.g. a `roles` field that only accepts `ROLE_USER`, not `USER`).
+   **IMPORTANT**: Look up the actual signup DTO fields in the endpoint description and include ALL `@NotBlank`/required fields in the JSON body. Do not blindly copy the example above — adapt the JSON to match the real DTO.
 3. For every request to an authenticated endpoint, add `.header("Authorization", "Bearer " + token)`.
 4. If no auth endpoints are present in the list, derive reasonable signup/signin paths from the controller's base path.
 5. Test ALL endpoints fully — do NOT skip authenticated endpoints.
@@ -171,3 +174,4 @@ Before returning code, verify internally:
 - Is there NO `@BeforeAll` setting `RestAssured.baseURI` or `RestAssured.port`?
 - Is there a factory method for each DTO type used, and do tests call it instead of filling fields inline?
 - Is there an explicit `import` statement for every DTO class used in factory methods?
+- Does the `@BeforeAll` signup JSON include ALL required fields from the actual signup DTO (not just the example fields)?
