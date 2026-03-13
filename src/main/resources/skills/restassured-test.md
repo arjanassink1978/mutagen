@@ -61,6 +61,7 @@ When an endpoint has a request body with a known DTO type and import path (e.g. 
 3. For the "empty body" test, send a raw empty JSON string — do NOT use the factory: `.body("{}")`
 4. If no import path is available, fall back to a raw JSON string (no factory needed).
 5. **One factory method per DTO type** — reuse it across all tests in the class that use the same DTO.
+6. **Do NOT set enum-typed or `Set<String>` role/type fields** in the factory unless the exact valid enum values are explicitly listed in the endpoint description. Leave those fields null so the server uses its defaults.
 
 ### Class structure
 - **Every generated test class MUST extend `AbstractIT`**:
@@ -106,7 +107,7 @@ The tests run against a live backend. If **any** endpoint in the controller is m
                           .extract().path("token");
        }
    ```
-   When using DTO classes instead of raw JSON strings, declare `uniqueUser` and `uniqueEmail` as `static` fields and set them before `@BeforeAll` runs, then use setter methods on the DTO.
+   **IMPORTANT**: Always use raw JSON strings in `@BeforeAll` (as shown above) — never use DTO factory methods for auth setup. Raw JSON avoids enum/validation surprises (e.g. a `roles` field that only accepts `ROLE_USER`, not `USER`).
 3. For every request to an authenticated endpoint, add `.header("Authorization", "Bearer " + token)`.
 4. If no auth endpoints are present in the list, derive reasonable signup/signin paths from the controller's base path.
 5. Test ALL endpoints fully — do NOT skip authenticated endpoints.
