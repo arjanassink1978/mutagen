@@ -74,19 +74,19 @@ public class Main implements Callable<Integer> {
         SkillLoader skillLoader = new SkillLoader();
         TestGeneratorService service = new TestGeneratorService(llmClient, skillLoader);
 
-        List<GeneratedTest> tests = service.generateAll(result);
-        if (tests.isEmpty()) {
-            log.warn("No tests generated — nothing to mutate");
-            return 1;
-        }
-
         int threshold = Integer.parseInt(System.getenv().getOrDefault("MUTATION_THRESHOLD", "80"));
         int maxIterations = Integer.parseInt(System.getenv().getOrDefault("MUTATION_MAX_ITERATIONS", "3"));
 
-        // Pitest runs from the target project — tests are written inline during the loop
+        // Backend is started inside the loop service so that AuthProber can probe auth
+        // BEFORE test generation — this guarantees the LLM gets verified payloads.
         PitestRunner runner = PitestRunner.detect(repoPath);
         MutationLoopService loopService = new MutationLoopService(llmClient, skillLoader, runner);
-        MutationLoopResult loopResult = loopService.run(tests, repoPath, threshold, maxIterations);
+        MutationLoopResult loopResult = loopService.run(result, service, null, repoPath, threshold, maxIterations);
+
+        if (loopResult.tests().isEmpty()) {
+            log.warn("No tests generated — nothing to mutate");
+            return 1;
+        }
 
         log.info("Mutation loop done: initial={}, final={}, iterations={}, threshold={}",
                 String.format(Locale.US, "%.1f%%", loopResult.initialScore()),

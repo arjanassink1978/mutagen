@@ -78,43 +78,25 @@ When an endpoint has a request body with a known DTO type and import path (e.g. 
 ### Authentication
 The tests run against a live backend. If **any** endpoint in the controller is marked "⚠ Requires authentication":
 
-1. Look for a sign-up and sign-in endpoint in the provided endpoint list (typically `POST /api/auth/signup` and `POST /api/auth/signin`, or similar).
-2. Add a `@BeforeAll` **only** to set up the auth token (do NOT set baseURI/port — `AbstractIT` already does that):
+1. Check the prompt for a **"Verified auth setup"** section. If present, copy that code block VERBATIM into `@BeforeAll static void setUpAuth()` — do not change paths, field names, or the token field name. It has been tested against the running backend and is guaranteed to work.
+2. Add `private static String token;` as a class field.
+3. Add `import org.junit.jupiter.api.BeforeAll;` at the top.
+4. Structure:
    ```java
-   import io.restassured.RestAssured;
-   import org.junit.jupiter.api.BeforeAll;
-   ...
    public class UserApiIT extends AbstractIT {
-
        private static String token;
 
        @BeforeAll
        static void setUpAuth() {
-           // Use a unique username per run so tests are idempotent against any database (in-memory or persistent)
-           String uniqueUser = "testuser_" + java.util.UUID.randomUUID().toString().substring(0, 8);
-           String uniqueEmail = uniqueUser + "@example.com";
-
-           // Register test user — always succeeds because the username is unique
-           // IMPORTANT: include ALL required fields from the signup DTO (check the endpoint description for field list)
-           // Example with name+username+email+password — adapt to the actual DTO fields:
-           given().contentType(ContentType.JSON)
-                  .body("{\"name\":\"Test User\",\"username\":\"" + uniqueUser + "\",\"email\":\"" + uniqueEmail + "\",\"password\":\"Test1234!\"}")
-                  .post("/api/auth/signup");
-
-           // Sign in and capture token — use the field name from the response (commonly "token" or "accessToken")
-           token = given().contentType(ContentType.JSON)
-                          .body("{\"username\":\"" + uniqueUser + "\",\"password\":\"Test1234!\"}")
-                          .post("/api/auth/signin")
-                          .then().statusCode(200)
-                          .extract().path("token");
+           // paste the verified auth setup block here
        }
+       // @Test methods ...
+   }
    ```
-   **IMPORTANT**: Always use raw JSON strings in `@BeforeAll` (as shown above) — never use DTO factory methods for auth setup. Raw JSON avoids enum/validation surprises (e.g. a `roles` field that only accepts `ROLE_USER`, not `USER`).
-   **IMPORTANT**: Look up the actual signup DTO fields in the endpoint description and include ALL `@NotBlank`/required fields in the JSON body. Do not blindly copy the example above — adapt the JSON to match the real DTO.
-3. For every request to an authenticated endpoint, add `.header("Authorization", "Bearer " + token)`.
-4. If no auth endpoints are present in the list, derive reasonable signup/signin paths from the controller's base path.
-5. Test ALL endpoints fully — do NOT skip authenticated endpoints.
-6. **For status code assertions, be flexible about ambiguous cases:**
+5. For every request to an authenticated endpoint, add `.header("Authorization", "Bearer " + token)`.
+6. If **no "Verified auth setup"** section is in the prompt, derive signup/signin paths from the auth endpoints listed and use raw JSON strings (never DTO factory methods) with UUID-based unique values.
+7. Test ALL endpoints fully — do NOT skip authenticated endpoints.
+8. **For status code assertions, be flexible about ambiguous cases:**
    - A successful resource creation may return `200` OR `201` — use `anyOf(is(200), is(201))` when unsure
    - An invalid credentials response may return `400` OR `401` — use `anyOf(is(400), is(401))` when unsure
    - A not-found response may return `404` OR `400` — prefer `is(404)` for ID lookups
@@ -174,4 +156,4 @@ Before returning code, verify internally:
 - Is there NO `@BeforeAll` setting `RestAssured.baseURI` or `RestAssured.port`?
 - Is there a factory method for each DTO type used, and do tests call it instead of filling fields inline?
 - Is there an explicit `import` statement for every DTO class used in factory methods?
-- Does the `@BeforeAll` signup JSON include ALL required fields from the actual signup DTO (not just the example fields)?
+- If a "Verified auth setup" section was provided, is it copied verbatim into `@BeforeAll setUpAuth()`?

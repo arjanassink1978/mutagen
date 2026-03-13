@@ -1,7 +1,11 @@
 package dev.mutagen.mutation;
 
+import dev.mutagen.auth.AuthProber;
+import dev.mutagen.auth.AuthSetupInfo;
 import dev.mutagen.generator.GeneratedTest;
 import dev.mutagen.generator.PromptBuilder;
+import dev.mutagen.generator.TestGeneratorService;
+import dev.mutagen.model.ParseResult;
 import dev.mutagen.llm.client.LlmClient;
 import dev.mutagen.llm.model.LlmRequest;
 import dev.mutagen.llm.model.LlmResponse;
@@ -66,6 +70,91 @@ public class MutationLoopService {
         this.reportParser   = new MutationReportParser();
         this.promptBuilder  = new PromptBuilder();
         this.backendFactory = backendFactory;
+    }
+
+    /**
+     * Full pipeline: starts the backend, probes auth, generates tests, then runs the mutation loop.
+     *
+     * <p>Prefer this overload over passing pre-generated tests, because auth probing requires
+     * the backend to be running and must happen <em>before</em> test generation.
+     *
+     * @param parseResult       scanned endpoint data
+     * @param generatorService  test generator to invoke after auth probing
+     * @param existingTestCode  optional existing test snippet for style matching
+     * @param repoPath          root of the target Spring Boot project
+     * @param threshold         target mutation score (0–100)
+     * @param maxIterations     maximum number of pitest runs
+     */
+    public MutationLoopResult run(ParseResult parseResult,
+                                   TestGeneratorService generatorService,
+                                   String existingTestCode,
+                                   Path repoPath,
+                                   int threshold,
+                                   int maxIterations) throws IOException {
+
+        MutationReport report = null;
+        double initialScore   = -1;
+        int port              = 0;
+
+        BackendStarter backend = backendFactory.create(repoPath);
+        try {
+            port = backend.start();
+            log.info("Backend started on port {}", port);
+
+            // Probe auth before generating tests so the LLM gets verified payloads
+            AuthSetupInfo authSetupInfo = new AuthProber(port).probe(parseResult.getEndpoints());
+            if (authSetupInfo.isAvailable()) {
+                log.info("Auth probing succeeded — signin: {}, token field: '{}'",
+                        authSetupInfo.signinPath(), authSetupInfo.tokenField());
+            } else {
+                log.info("Auth probing: no auth flow found — tests will use skill template fallback");
+            }
+
+            List<GeneratedTest> current = generatorService.generateAll(parseResult, existingTestCode, authSetupInfo);
+            if (current.isEmpty()) {
+                log.warn("No tests generated — aborting mutation loop");
+                return new MutationLoopResult(current, 0, 0, 0, null, port);
+            }
+
+            current = validateAndFix(current, repoPath, port);
+
+            for (int iteration = 1; iteration <= maxIterations; iteration++) {
+                log.info("Mutation loop — iteration {}/{}", iteration, maxIterations);
+
+                writeTestFiles(current, repoPath, port);
+
+                Path reportPath = mutationRunner.run(current, repoPath);
+                report          = reportParser.parse(reportPath);
+
+                double score = report.getMutationScore();
+                log.info("  Score: {}% (target: {}%, killed: {}, survived: {}, no-coverage: {})",
+                        String.format("%.1f", score), threshold,
+                        report.getKilledCount(), report.getSurvivedCount(), report.getNoCoverageCount());
+
+                if (iteration == 1) initialScore = score;
+
+                if (score >= threshold) {
+                    log.info("  Threshold met — stopping");
+                    return new MutationLoopResult(current, initialScore, score, iteration, report, port);
+                }
+
+                if (iteration == maxIterations) break;
+
+                List<Mutant> survived = report.getSurvivedMutants();
+                if (survived.isEmpty()) break;
+
+                log.info("  Asking LLM to fill {} surviving mutant(s)...", survived.size());
+                current = augmentTests(current, survived, (int) score, threshold);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while waiting for backend", e);
+        } finally {
+            backend.stop();
+        }
+
+        double finalScore = report != null ? report.getMutationScore() : 0;
+        return new MutationLoopResult(new ArrayList<>(), initialScore, finalScore, maxIterations, report, port);
     }
 
     /**

@@ -1,5 +1,6 @@
 package dev.mutagen.generator;
 
+import dev.mutagen.auth.AuthSetupInfo;
 import dev.mutagen.llm.client.LlmClient;
 import dev.mutagen.llm.model.LlmRequest;
 import dev.mutagen.llm.model.LlmResponse;
@@ -36,14 +37,20 @@ public class TestGeneratorService {
     }
 
     public List<GeneratedTest> generateAll(ParseResult parseResult) {
-        return generateAll(parseResult, null);
+        return generateAll(parseResult, null, null);
+    }
+
+    public List<GeneratedTest> generateAll(ParseResult parseResult, String existingTestCode) {
+        return generateAll(parseResult, existingTestCode, null);
     }
 
     /**
      * @param existingTestCode optional fragment of an existing test in the repo,
      *                         used to match the team's testing style
+     * @param authSetupInfo    optional verified auth setup from {@link dev.mutagen.auth.AuthProber}
      */
-    public List<GeneratedTest> generateAll(ParseResult parseResult, String existingTestCode) {
+    public List<GeneratedTest> generateAll(ParseResult parseResult, String existingTestCode,
+                                            AuthSetupInfo authSetupInfo) {
         Map<String, List<EndpointInfo>> byController = parseResult.getEndpoints()
                 .stream()
                 .collect(Collectors.groupingBy(EndpointInfo::getControllerClass));
@@ -74,7 +81,7 @@ public class TestGeneratorService {
             log.info("[{}/{}] Generating for {} ({} endpoints)...",
                     index++, byController.size(), controllerClass, endpoints.size());
             try {
-                GeneratedTest test = generateForController(controllerClass, endpoints, skill, existingTestCode, authEndpoints);
+                GeneratedTest test = generateForController(controllerClass, endpoints, skill, existingTestCode, authEndpoints, authSetupInfo);
                 results.add(test);
                 log.info("  ✓ {} generated ({} tokens)", test.getTestClassName(), test.getInputTokens() + test.getOutputTokens());
             } catch (Exception e) {
@@ -94,13 +101,19 @@ public class TestGeneratorService {
     public GeneratedTest generateForController(String controllerClass, List<EndpointInfo> endpoints,
                                                 Skill skill, String existingTestCode,
                                                 List<EndpointInfo> authEndpoints) {
+        return generateForController(controllerClass, endpoints, skill, existingTestCode, authEndpoints, null);
+    }
+
+    public GeneratedTest generateForController(String controllerClass, List<EndpointInfo> endpoints,
+                                                Skill skill, String existingTestCode,
+                                                List<EndpointInfo> authEndpoints, AuthSetupInfo authSetupInfo) {
         String packageName   = derivePackageName(endpoints);
         String testClassName = deriveTestClassName(controllerClass);
 
         LlmRequest request = LlmRequest.builder()
                 .systemPrompt(skill.getContent())
                 .userPrompt(promptBuilder.buildTestGenerationPrompt(
-                        controllerClass, packageName, endpoints, existingTestCode, authEndpoints))
+                        controllerClass, packageName, endpoints, existingTestCode, authEndpoints, authSetupInfo))
                 .maxTokens(4096)
                 .temperature(0.1f)
                 .build();

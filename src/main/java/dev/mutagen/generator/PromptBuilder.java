@@ -1,5 +1,6 @@
 package dev.mutagen.generator;
 
+import dev.mutagen.auth.AuthSetupInfo;
 import dev.mutagen.model.EndpointInfo;
 import dev.mutagen.model.ParamInfo;
 import dev.mutagen.model.RequestBodyInfo;
@@ -22,6 +23,13 @@ public class PromptBuilder {
     public String buildTestGenerationPrompt(String controllerClass, String packageName,
                                              List<EndpointInfo> endpoints, String existingTestCode,
                                              List<EndpointInfo> authEndpoints) {
+        return buildTestGenerationPrompt(controllerClass, packageName, endpoints, existingTestCode,
+                authEndpoints, null);
+    }
+
+    public String buildTestGenerationPrompt(String controllerClass, String packageName,
+                                             List<EndpointInfo> endpoints, String existingTestCode,
+                                             List<EndpointInfo> authEndpoints, AuthSetupInfo authSetupInfo) {
         StringBuilder sb = new StringBuilder();
         sb.append("Generate RestAssured integration tests for the following Spring Boot controller.\n\n");
         sb.append("## Controller\n");
@@ -30,7 +38,13 @@ public class PromptBuilder {
         sb.append("Test class name: `").append(controllerClass.replace("Controller", "ControllerIT")).append("`\n\n");
 
         boolean needsAuth = endpoints.stream().anyMatch(EndpointInfo::isRequiresAuth);
-        if (needsAuth && !authEndpoints.isEmpty()) {
+
+        if (needsAuth && authSetupInfo != null && authSetupInfo.isAvailable()) {
+            sb.append("## Verified auth setup — use EXACTLY this in your @BeforeAll setUpAuth() body\n");
+            sb.append("```java\n");
+            sb.append(authSetupInfo.toJavaBeforeAllBody());
+            sb.append("```\n\n");
+        } else if (needsAuth && !authEndpoints.isEmpty()) {
             sb.append("## Auth endpoints (use these in @BeforeAll to obtain a JWT token)\n\n");
             authEndpoints.forEach(e -> sb.append(formatEndpoint(e)).append("\n"));
         }
