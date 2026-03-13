@@ -377,6 +377,51 @@ public class MutationLoopService {
             Files.writeString(target, source);
             log.debug("  Wrote {}", test.getRelativeFilePath());
         }
+        writeAbstractIT(tests, repoPath, port);
+    }
+
+    /**
+     * Writes {@code AbstractIT.java} next to the generated IT files so the
+     * inline Pitest run can resolve the base class.
+     */
+    private void writeAbstractIT(List<GeneratedTest> tests, Path repoPath, int port)
+            throws IOException {
+        if (tests.isEmpty()) return;
+        String packageName = derivePackage(tests.getFirst().getSourceCode());
+        if (packageName.isBlank()) return;
+
+        Path target = repoPath.resolve(
+                tests.getFirst().getRelativeFilePath())
+                .getParent().resolve("AbstractIT.java");
+
+        String source = """
+                package %s;
+
+                import io.restassured.RestAssured;
+                import org.junit.jupiter.api.BeforeAll;
+
+                public abstract class AbstractIT {
+
+                    @BeforeAll
+                    static void setUpRestAssured() {
+                        RestAssured.baseURI = "http://localhost";
+                        RestAssured.port    = %d;
+                    }
+                }
+                """.formatted(packageName, port);
+
+        Files.writeString(target, source);
+        log.debug("  Wrote AbstractIT.java");
+    }
+
+    private String derivePackage(String sourceCode) {
+        for (String line : sourceCode.split("\n")) {
+            line = line.strip();
+            if (line.startsWith("package ") && line.endsWith(";")) {
+                return line.substring("package ".length(), line.length() - 1).strip();
+            }
+        }
+        return "";
     }
 
     /**
