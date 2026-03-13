@@ -25,6 +25,8 @@ Do NOT import `io.restassured.RestAssured` or `org.junit.jupiter.api.BeforeAll` 
 ### Request body: use DTO factory methods, not inline field-filling
 When an endpoint has a request body with a known DTO type and import path (e.g. `LoginRequest (import: io.example.request.LoginRequest)`):
 
+**IMPORTANT**: Add `import io.example.request.LoginRequest;` (the exact FQN from the `import:` annotation) to the top of the file alongside the other imports. Without this import the class will not compile.
+
 1. **Declare a private static factory method** at the bottom of the test class that returns a fully valid instance with sensible defaults. Fields that must be unique (username, email, slug, code, …) use a UUID-based value:
    ```java
    private static LoginRequest validLoginRequest() {
@@ -167,3 +169,4 @@ Before returning code, verify internally:
 - Does the class extend `AbstractIT`?
 - Is there NO `@BeforeAll` setting `RestAssured.baseURI` or `RestAssured.port`?
 - Is there a factory method for each DTO type used, and do tests call it instead of filling fields inline?
+- Is there an explicit `import` statement for every DTO class used in factory methods?
