@@ -178,9 +178,14 @@ src/main/resources/skills/
 - [x] Skill system with user overrides
 - [x] RestAssured test generator
 - [x] Pitest mutation loop (subprocess, XML report parsing, LLM gap-fill)
+- [x] Auth probing — auto-discovers signup/signin flow from running backend
+- [x] `@SpringBootTest` embedded server support (no external backend needed)
+- [x] AbstractIT base class generation with JWT auth setup
 - [x] GitLab MR integration
 - [x] GitHub PR integration
 - [ ] GitLab CI/CD Catalog component
+- [ ] Incremental runs (manifest-based, skip unchanged endpoints)
+- [ ] Free vs paid plan (endpoint limit + Gumroad license)
 
 ---
 

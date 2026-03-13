@@ -64,11 +64,56 @@ public record AuthSetupInfo(
      * <p>Example output: {@code "{\"username\":\"" + uniqueUser + "\",\"email\":\"" + uniqueEmail + "\",\"password\":\"Test1234!\"}"}
      */
     static String templateToJavaString(String template) {
-        // Escape double quotes first, then replace the placeholders with Java string concatenation
-        String escaped = template.replace("\"", "\\\"");
-        String result = escaped
-                .replace("UNIQUE_EMAIL", "\\\" + uniqueEmail + \\\"")
-                .replace("UNIQUE_USER",  "\\\" + uniqueUser + \\\"");
-        return "\"" + result + "\"";
+        // Walk through the template, splitting on UNIQUE_USER / UNIQUE_EMAIL placeholders,
+        // and build a proper Java string-concatenation expression.
+        StringBuilder sb = new StringBuilder();
+        String remaining = template;
+        boolean firstSegment = true;
+
+        while (!remaining.isEmpty()) {
+            int userIdx  = remaining.indexOf("UNIQUE_USER");
+            int emailIdx = remaining.indexOf("UNIQUE_EMAIL");
+
+            if (userIdx == -1 && emailIdx == -1) {
+                // No more placeholders — append remaining literal
+                appendLiteral(sb, remaining, firstSegment);
+                break;
+            }
+
+            String varName;
+            int nextIdx;
+            int placeholderLen;
+            if (emailIdx == -1 || (userIdx != -1 && userIdx < emailIdx)) {
+                nextIdx        = userIdx;
+                varName        = "uniqueUser";
+                placeholderLen = "UNIQUE_USER".length();
+            } else {
+                nextIdx        = emailIdx;
+                varName        = "uniqueEmail";
+                placeholderLen = "UNIQUE_EMAIL".length();
+            }
+
+            String before = remaining.substring(0, nextIdx);
+            appendLiteral(sb, before, firstSegment);
+            firstSegment = false;
+            sb.append(" + ").append(varName);
+            remaining = remaining.substring(nextIdx + placeholderLen);
+        }
+
+        if (firstSegment) {
+            // Template had no placeholders at all — just wrap in quotes
+            sb.append("\"").append(template.replace("\"", "\\\"")).append("\"");
+        }
+        return sb.toString();
+    }
+
+    /** Appends {@code + "<escaped literal>"} (or just {@code "<escaped>"} when first). */
+    private static void appendLiteral(StringBuilder sb, String literal, boolean first) {
+        String escaped = literal.replace("\\", "\\\\").replace("\"", "\\\"");
+        if (first) {
+            sb.append("\"").append(escaped).append("\"");
+        } else {
+            sb.append(" + \"").append(escaped).append("\"");
+        }
     }
 }

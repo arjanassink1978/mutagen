@@ -79,19 +79,22 @@ class TestGeneratorServiceTest {
 
         List<GeneratedTest> results = service.generateAll(parseResult);
 
-        assertThat(results).hasSize(1);
-        assertThat(results.get(0).getControllerClass()).isEqualTo("UserController");
-        assertThat(results.get(0).getTestClassName()).isEqualTo("UserControllerIT");
+        // generateAll now returns AbstractIT + one IT class per controller
+        assertThat(results).hasSize(2);
+        assertThat(results.get(0).getTestClassName()).isEqualTo("AbstractIT");
+        assertThat(results.get(1).getControllerClass()).isEqualTo("UserController");
+        assertThat(results.get(1).getTestClassName()).isEqualTo("UserControllerIT");
     }
 
     @Test
     void generateAll_callsLlmOncePerController() {
-        mockLlm.thenReturn(MOCK_GENERATED_TEST).thenReturn(MOCK_GENERATED_TEST);
+        // 1 call for AbstractIT + 2 for controllers = 3 total
+        mockLlm.thenReturn(MOCK_GENERATED_TEST).thenReturn(MOCK_GENERATED_TEST).thenReturn(MOCK_GENERATED_TEST);
         ParseResult parseResult = buildParseResultWithTwoControllers();
 
         service.generateAll(parseResult);
 
-        assertThat(mockLlm.getCallCount()).isEqualTo(2);
+        assertThat(mockLlm.getCallCount()).isEqualTo(3);
     }
 
     @Test
@@ -137,21 +140,23 @@ class TestGeneratorServiceTest {
 
         List<GeneratedTest> results = service.generateAll(parseResult);
 
-        assertThat(results.get(0).getRelativeFilePath())
+        // Index 0 = AbstractIT, index 1 = UserControllerIT
+        assertThat(results.get(1).getRelativeFilePath())
                 .isEqualTo("src/test/java/com/example/controller/UserControllerIT.java");
     }
 
     @Test
     void generateAll_controllerFails_continuesWithNext() {
-        // Eerste call gooit exception, tweede slaagt
-        mockLlm.thenAnswer(req -> { throw new RuntimeException("API timeout"); })
+        // Call 1: AbstractIT (succeeds), call 2: controller 1 (fails), call 3: controller 2 (succeeds)
+        mockLlm.thenReturn(MOCK_GENERATED_TEST)
+               .thenAnswer(req -> { throw new RuntimeException("API timeout"); })
                .thenReturn(MOCK_GENERATED_TEST);
 
         ParseResult parseResult = buildParseResultWithTwoControllers();
         List<GeneratedTest> results = service.generateAll(parseResult);
 
-        // Eén van de twee controllers slaagt
-        assertThat(results).hasSize(1);
+        // AbstractIT + één van de twee controllers slaagt
+        assertThat(results).hasSize(2);
     }
 
     @Test

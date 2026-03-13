@@ -28,7 +28,8 @@ public class SkillLoader {
     private static final Map<Skill.Type, String> SKILL_FILES = Map.of(
             Skill.Type.RESTASSURED_TEST,      "restassured-test.md",
             Skill.Type.MUTATION_GAP_ANALYSIS, "mutation-gap-analysis.md",
-            Skill.Type.TEST_IMPROVEMENT,      "test-improvement.md"
+            Skill.Type.TEST_IMPROVEMENT,      "test-improvement.md",
+            Skill.Type.ABSTRACT_IT,           "abstract-it.md"
     );
 
     private final Optional<Path> customSkillsPath;

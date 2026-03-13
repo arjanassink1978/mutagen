@@ -324,11 +324,14 @@ public class AuthProber {
     /**
      * Replaces occurrences of the probed unique value with UNIQUE_USER / UNIQUE_EMAIL placeholders
      * so the returned body can be used as a template in the LLM prompt.
+     *
+     * <p>Generated values follow the pattern {@code "user_<unique>"} and
+     * {@code "user_<unique>@example.com"}, so we replace those full prefixed forms.
      */
     private String toTemplate(String body, String unique) {
         return body
-                .replace(unique + "@example.com", "UNIQUE_EMAIL")
-                .replace(unique, "UNIQUE_USER");
+                .replace("user_" + unique + "@example.com", "UNIQUE_EMAIL")
+                .replace("user_" + unique, "UNIQUE_USER");
     }
 
     private String toJson(Map<String, Object> map) {

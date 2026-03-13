@@ -95,8 +95,29 @@ The tests run against a live backend. If **any** endpoint in the controller is m
    ```
 5. For every request to an authenticated endpoint, add `.header("Authorization", "Bearer " + token)`.
 6. If **no "Verified auth setup"** section is in the prompt, derive signup/signin paths from the auth endpoints listed and use raw JSON strings (never DTO factory methods) with UUID-based unique values.
-7. Test ALL endpoints fully — do NOT skip authenticated endpoints.
-8. **For status code assertions, be flexible about ambiguous cases:**
+7. **For the auth controller test class**: when testing the signin endpoint with valid credentials, use `testUsername` and `testPassword` from the `AbstractIT` base class (these are the credentials used in `setUp()`). Do NOT generate a random username that doesn't exist in the database. Example:
+   ```java
+   @Test
+   void authenticateUser_validCredentials_returns200() {
+       Map<String, Object> body = new HashMap<>();
+       body.put("username", testUsername);
+       body.put("password", testPassword);
+       given().contentType(ContentType.JSON).body(body)
+              .post("/api/auth/signin")
+              .then().statusCode(200)
+              .body("token", notNullValue());
+   }
+   ```
+8. Test ALL endpoints fully — do NOT skip authenticated endpoints.
+9. **For multipart endpoints with optional file/image parameters**: do NOT include the file in the test — just send the required text fields. RestAssured's `.multiPart(name, byte[], mimeType)` overload causes serialization errors. If a file upload IS needed, use `.multiPart("field", "filename.ext", bytes)` (3-arg form with filename). Example for a multipart POST with optional image:
+   ```java
+   given().header("Authorization", "Bearer " + token)
+          .contentType(ContentType.MULTIPART)
+          .multiPart("content", "some text")   // required field only
+          .post("/api/messages")
+          .then().statusCode(anyOf(is(200), is(201)));
+   ```
+10. **For status code assertions, be flexible about ambiguous cases:**
    - A successful resource creation may return `200` OR `201` — use `anyOf(is(200), is(201))` when unsure
    - An invalid credentials response may return `400` OR `401` — use `anyOf(is(400), is(401))` when unsure
    - A not-found response may return `404` OR `400` — prefer `is(404)` for ID lookups
@@ -107,6 +128,8 @@ The tests run against a live backend. If **any** endpoint in the controller is m
 1. Happy path — expect 200 (if no data exists, just check status code, not body size)
 2. Not found — expect 404 (for `/{id}` endpoints, use a non-existent ID like 999999)
 3. Invalid parameter — expect 400 (for `@Min`, `@Max`, type mismatch)
+
+**IMPORTANT for GET endpoints**: Do NOT set `contentType(ContentType.JSON)` on GET requests. GET requests have no body; setting Content-Type is meaningless and causes inconsistent behavior across environments (Spring may return 415 in some JVMs, 200 in others). Just use `given().get(path)` or `given().header("Authorization", ...).get(path)`.
 
 **POST/PUT/PATCH endpoints:**
 1. Happy path — valid body, expect 200 or 201
@@ -146,6 +169,7 @@ Examples:
 - No System.out.println
 - Do NOT test happy-path GET-by-ID when you cannot guarantee the resource exists
 - Do NOT test happy-path DELETE — it requires prior state that may not exist
+- Do NOT test happy-path nested POST/PUT/PATCH on a parent resource (e.g. `/messages/{id}/reply`, `/messages/{id}/like`) when you cannot guarantee the parent exists. Instead test the not-found case with a non-existent ID like 999999 and expect `anyOf(is(404), is(400))`
 
 ## Quality check
 Before returning code, verify internally:

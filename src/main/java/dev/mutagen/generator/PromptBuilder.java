@@ -1,6 +1,6 @@
 package dev.mutagen.generator;
 
-import dev.mutagen.auth.AuthSetupInfo;
+import dev.mutagen.auth.AuthContext;
 import dev.mutagen.model.EndpointInfo;
 import dev.mutagen.model.ParamInfo;
 import dev.mutagen.model.RequestBodyInfo;
@@ -15,45 +15,26 @@ import java.util.List;
  */
 public class PromptBuilder {
 
-    public String buildTestGenerationPrompt(String controllerClass, String packageName,
-                                             List<EndpointInfo> endpoints, String existingTestCode) {
-        return buildTestGenerationPrompt(controllerClass, packageName, endpoints, existingTestCode, List.of());
-    }
-
-    public String buildTestGenerationPrompt(String controllerClass, String packageName,
-                                             List<EndpointInfo> endpoints, String existingTestCode,
-                                             List<EndpointInfo> authEndpoints) {
-        return buildTestGenerationPrompt(controllerClass, packageName, endpoints, existingTestCode,
-                authEndpoints, null);
-    }
-
+    /**
+     * Builds the prompt for generating a single IT test class.
+     * Auth setup is handled by AbstractIT — this prompt only needs to convey endpoints
+     * and inform the LLM about which token field to use (userToken / adminToken / none).
+     */
     public String buildTestGenerationPrompt(String controllerClass, String packageName,
                                              List<EndpointInfo> endpoints, String existingTestCode,
-                                             List<EndpointInfo> authEndpoints, AuthSetupInfo authSetupInfo) {
+                                             AuthContext authContext) {
         StringBuilder sb = new StringBuilder();
         sb.append("Generate RestAssured integration tests for the following Spring Boot controller.\n\n");
         sb.append("## Controller\n");
         sb.append("Class: `").append(controllerClass).append("`\n");
-        sb.append("Package: `").append(packageName).append("`\n");
-        sb.append("Test class name: `").append(controllerClass.replace("Controller", "ControllerIT")).append("`\n\n");
+        sb.append("Package: `").append(packageName).append("`\n\n");
 
-        boolean needsAuth = endpoints.stream().anyMatch(EndpointInfo::isRequiresAuth);
-
-        if (needsAuth && authSetupInfo != null && authSetupInfo.isAvailable()) {
-            sb.append("## Verified auth setup — use EXACTLY this in your @BeforeAll setUpAuth() body\n");
-            sb.append("```java\n");
-            sb.append(authSetupInfo.toJavaBeforeAllBody());
-            sb.append("```\n\n");
-        } else if (needsAuth) {
-            // Auth probing failed or was skipped — tell the LLM to derive it from available info
-            sb.append("## Auth setup (NOT verified — derive from the endpoint descriptions below)\n");
-            sb.append("> Note: automated auth probing could not discover a working login flow for this project.\n");
-            sb.append("> Build the @BeforeAll setup yourself using the auth endpoints listed below.\n");
-            sb.append("> Use raw JSON strings (not DTO factory methods), include all required fields, and\n");
-            sb.append("> use a UUID-based unique username/email per run.\n\n");
-            if (!authEndpoints.isEmpty()) {
-                authEndpoints.forEach(e -> sb.append(formatEndpoint(e)).append("\n"));
-            }
+        // Let the LLM know what tokens AbstractIT provides
+        if (authContext.securityEnabled()) {
+            sb.append("## Auth tokens (provided by AbstractIT base class)\n");
+            sb.append("- `token` — regular user JWT (use for user-level endpoints)\n");
+            sb.append("- `adminToken` — admin JWT if admin role exists (use for admin-only endpoints)\n");
+            sb.append("If an endpoint requires auth, use `\"Bearer \" + token` or `\"Bearer \" + adminToken`.\n\n");
         }
 
         sb.append("## Endpoints (").append(endpoints.size()).append(" total)\n\n");
@@ -65,8 +46,9 @@ public class PromptBuilder {
         }
 
         sb.append("## Instruction\n");
-        sb.append("Generate the complete test class. ");
-        sb.append("Start with `package ").append(packageName).append(";` and end with the last `}`.");
+        sb.append("Generate the complete test class extending AbstractIT. ");
+        sb.append("Start with `package ").append(packageName).append(";` and end with the last `}`.\n");
+        sb.append("Do NOT add a @BeforeAll — RestAssured setup and auth are in AbstractIT.");
         return sb.toString();
     }
 

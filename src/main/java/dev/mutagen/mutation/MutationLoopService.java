@@ -1,7 +1,7 @@
 package dev.mutagen.mutation;
 
-import dev.mutagen.auth.AuthProber;
-import dev.mutagen.auth.AuthSetupInfo;
+import dev.mutagen.auth.AuthAnalyzer;
+import dev.mutagen.auth.AuthContext;
 import dev.mutagen.generator.GeneratedTest;
 import dev.mutagen.generator.PromptBuilder;
 import dev.mutagen.generator.TestGeneratorService;
@@ -92,36 +92,38 @@ public class MutationLoopService {
                                    int threshold,
                                    int maxIterations) throws IOException {
 
-        MutationReport report = null;
-        double initialScore   = -1;
-        int port              = 0;
+        MutationReport        report      = null;
+        double                initialScore = -1;
+        int                   port         = 0;
+        List<GeneratedTest>   current      = List.of();
 
         BackendStarter backend = backendFactory.create(repoPath);
         try {
             port = backend.start();
             log.info("Backend started on port {}", port);
 
-            // Probe auth before generating tests so the LLM gets verified payloads
-            AuthSetupInfo authSetupInfo = new AuthProber(port).probe(parseResult.getEndpoints());
-            if (authSetupInfo.isAvailable()) {
-                log.info("Auth probing succeeded — signin: {}, token field: '{}'",
-                        authSetupInfo.signinPath(), authSetupInfo.tokenField());
-            } else {
-                log.info("Auth probing: no auth flow found — tests will use skill template fallback");
-            }
+            // Analyse the project's security config statically (no HTTP calls needed)
+            AuthContext authContext = new AuthAnalyzer().analyze(repoPath);
 
-            List<GeneratedTest> current = generatorService.generateAll(parseResult, existingTestCode, authSetupInfo);
+            current = generatorService.generateAll(parseResult, existingTestCode, authContext);
             if (current.isEmpty()) {
                 log.warn("No tests generated — aborting mutation loop");
                 return new MutationLoopResult(current, 0, 0, 0, null, port);
             }
 
-            current = validateAndFix(current, repoPath, port);
+            // Stop the external backend before Pitest.
+            // The inline tests use @SpringBootTest(RANDOM_PORT), so Spring starts its own
+            // embedded server inside the Pitest JVM — the only way Pitest can instrument
+            // the production code and actually track mutation coverage.
+            backend.stop();
+            log.info("Backend stopped — @SpringBootTest will start embedded server during Pitest");
+
+            current = validateAndFix(current, repoPath, 0);
 
             for (int iteration = 1; iteration <= maxIterations; iteration++) {
                 log.info("Mutation loop — iteration {}/{}", iteration, maxIterations);
 
-                writeTestFiles(current, repoPath, port);
+                writeTestFiles(current, repoPath, 0);
 
                 Path reportPath = mutationRunner.run(current, repoPath);
                 report          = reportParser.parse(reportPath);
@@ -145,21 +147,24 @@ public class MutationLoopService {
 
                 log.info("  Asking LLM to fill {} surviving mutant(s)...", survived.size());
                 current = augmentTests(current, survived, (int) score, threshold);
+                current = validateAndFix(current, repoPath, port);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            backend.stop(); // ensure stopped on interrupt
             throw new IOException("Interrupted while waiting for backend", e);
-        } finally {
-            backend.stop();
+        } catch (Exception e) {
+            backend.stop(); // ensure stopped on any other exception
+            throw e;
         }
 
         double finalScore = report != null ? report.getMutationScore() : 0;
-        return new MutationLoopResult(new ArrayList<>(), initialScore, finalScore, maxIterations, report, port);
+        return new MutationLoopResult(current, initialScore, finalScore, maxIterations, report, 0);
     }
 
     /**
      * Runs the mutation loop and returns the final result.
-     * Starts the target backend before running Pitest and stops it afterwards.
+     * No external backend is started — tests use {@code @SpringBootTest(RANDOM_PORT)}.
      *
      * @param tests         initial generated tests (in-memory; will be written to disk each iteration)
      * @param repoPath      root of the target Spring Boot project
@@ -174,65 +179,67 @@ public class MutationLoopService {
         List<GeneratedTest> current = new ArrayList<>(tests);
         MutationReport report       = null;
         double initialScore         = -1;
-        int port                    = 0;
 
-        BackendStarter backend = backendFactory.create(repoPath);
+        // This overload has no auth probing — no external backend needed.
+        // @SpringBootTest handles the embedded server during Pitest.
         try {
-            port = backend.start();
-            log.info("Backend started on port {}", port);
-
-            current = validateAndFix(current, repoPath, port);
-
-            for (int iteration = 1; iteration <= maxIterations; iteration++) {
-                log.info("Mutation loop — iteration {}/{}", iteration, maxIterations);
-
-                writeTestFiles(current, repoPath, port);
-
-                Path reportPath = mutationRunner.run(current, repoPath);
-                report          = reportParser.parse(reportPath);
-
-                double score = report.getMutationScore();
-                log.info("  Score: {}% (target: {}%, killed: {}, survived: {}, no-coverage: {})",
-                        String.format("%.1f", score), threshold,
-                        report.getKilledCount(), report.getSurvivedCount(), report.getNoCoverageCount());
-
-                if (iteration == 1) initialScore = score;
-
-                if (score >= threshold) {
-                    log.info("  Threshold met — stopping");
-                    return new MutationLoopResult(current, initialScore, score, iteration, report, port);
-                }
-
-                if (iteration == maxIterations) break;
-
-                List<Mutant> survived = report.getSurvivedMutants();
-                if (survived.isEmpty()) break;
-
-                log.info("  Asking LLM to fill {} surviving mutant(s)...", survived.size());
-                current = augmentTests(current, survived, (int) score, threshold);
-            }
+            current = validateAndFix(current, repoPath, 0);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IOException("Interrupted while waiting for backend", e);
-        } finally {
-            backend.stop();
+            throw new IOException("Interrupted during test validation", e);
+        }
+
+        for (int iteration = 1; iteration <= maxIterations; iteration++) {
+            log.info("Mutation loop — iteration {}/{}", iteration, maxIterations);
+
+            writeTestFiles(current, repoPath, 0);
+
+            Path reportPath = mutationRunner.run(current, repoPath);
+            report          = reportParser.parse(reportPath);
+
+            double score = report.getMutationScore();
+            log.info("  Score: {}% (target: {}%, killed: {}, survived: {}, no-coverage: {})",
+                    String.format("%.1f", score), threshold,
+                    report.getKilledCount(), report.getSurvivedCount(), report.getNoCoverageCount());
+
+            if (iteration == 1) initialScore = score;
+
+            if (score >= threshold) {
+                log.info("  Threshold met — stopping");
+                return new MutationLoopResult(current, initialScore, score, iteration, report, 0);
+            }
+
+            if (iteration == maxIterations) break;
+
+            List<Mutant> survived = report.getSurvivedMutants();
+            if (survived.isEmpty()) break;
+
+            log.info("  Asking LLM to fill {} surviving mutant(s)...", survived.size());
+            current = augmentTests(current, survived, (int) score, threshold);
+            try {
+                current = validateAndFix(current, repoPath, 0);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted during post-augment validation", e);
+            }
         }
 
         double finalScore = report != null ? report.getMutationScore() : 0;
-        return new MutationLoopResult(current, initialScore, finalScore, maxIterations, report, port);
+        return new MutationLoopResult(current, initialScore, finalScore, maxIterations, report, 0);
     }
 
     // ---------------------------------------------------------------
 
     /**
-     * Runs the generated tests against the live backend and asks the LLM to fix any failures.
+     * Runs the generated tests via {@code mvn test} and asks the LLM to fix any failures.
+     * Tests use {@code @SpringBootTest(RANDOM_PORT)} so no external backend is needed.
      * Repeats up to 3 times until all tests pass.
      */
     private List<GeneratedTest> validateAndFix(List<GeneratedTest> tests,
-                                                Path repoPath, int port) throws IOException, InterruptedException {
+                                                Path repoPath, int portUnused) throws IOException, InterruptedException {
         if (!repoPath.resolve("pom.xml").toFile().exists()) {
             log.debug("No pom.xml in {} — skipping pre-flight test validation", repoPath);
-            writeTestFiles(tests, repoPath, port);
+            writeTestFiles(tests, repoPath, 0);
             return tests;
         }
 
@@ -240,7 +247,7 @@ public class MutationLoopService {
         List<GeneratedTest> current = new ArrayList<>(tests);
 
         for (int attempt = 1; attempt <= MAX_FIX_ATTEMPTS; attempt++) {
-            writeTestFiles(current, repoPath, port);
+            writeTestFiles(current, repoPath, 0);
             Map<String, String> failures = runTestsAndCollectFailures(current, repoPath);
             if (failures.isEmpty()) {
                 log.info("All tests pass — proceeding to mutation testing");
@@ -248,10 +255,16 @@ public class MutationLoopService {
             }
             log.info("  {} test class(es) failing (fix attempt {}/{})",
                     failures.size(), attempt, MAX_FIX_ATTEMPTS);
+            current = stripAbstractITTestMethods(current, failures);
             current = fixFailingTests(current, failures);
         }
-        log.warn("Tests still failing after fix attempts — proceeding to Pitest anyway");
-        writeTestFiles(current, repoPath, port);
+        writeTestFiles(current, repoPath, 0);
+        Map<String, String> remaining = runTestsAndCollectFailures(current, repoPath);
+        if (!remaining.isEmpty()) {
+            throw new IOException(
+                    "Tests still failing after " + MAX_FIX_ATTEMPTS + " fix attempts — aborting. " +
+                    "Failing classes: " + String.join(", ", remaining.keySet()));
+        }
         return current;
     }
 
@@ -344,12 +357,35 @@ public class MutationLoopService {
     }
 
     /**
+     * If AbstractIT has @Test methods (e.g. added by augmentTests before the guard was in place,
+     * or by LLM despite instructions), strip them — AbstractIT is infrastructure-only.
+     */
+    private List<GeneratedTest> stripAbstractITTestMethods(List<GeneratedTest> tests,
+                                                             Map<String, String> failures) {
+        boolean hasAbstractITError = failures.containsKey("AbstractIT")
+                || failures.values().stream().anyMatch(v -> v.contains("AbstractIT"));
+        if (!hasAbstractITError) return tests;
+
+        return tests.stream().map(test -> {
+            if (!"AbstractIT".equals(test.getTestClassName())) return test;
+            String src = test.getSourceCode();
+            if (!src.contains("@Test")) return test;
+            String stripped = stripTestMethods(src);
+            log.info("  Stripped rogue @Test methods from AbstractIT");
+            return test.withSourceCode(stripped);
+        }).toList();
+    }
+
+    /**
      * Asks the LLM to fix each failing test class given the failure summary.
      */
     private List<GeneratedTest> fixFailingTests(List<GeneratedTest> tests,
                                                   Map<String, String> failures) {
         Skill skill = skillLoader.load(Skill.Type.RESTASSURED_TEST);
         return tests.stream().map(test -> {
+            // AbstractIT is infrastructure — never send it to the LLM for fixing
+            if ("AbstractIT".equals(test.getTestClassName())) return test;
+
             String failureSummary = failures.get(test.getTestClassName());
             if (failureSummary == null) {
                 // Check if it's a compile-error affecting all
@@ -427,6 +463,9 @@ public class MutationLoopService {
         Skill skill = skillLoader.load(Skill.Type.MUTATION_GAP_ANALYSIS);
 
         return tests.stream().map(test -> {
+            // AbstractIT is infrastructure — never add @Test methods to it
+            if ("AbstractIT".equals(test.getTestClassName())) return test;
+
             List<Mutant> relevant = survived.stream()
                     .filter(m -> isRelevant(m, test))
                     .toList();
@@ -456,90 +495,18 @@ public class MutationLoopService {
     }
 
     /**
-     * Writes test files for the inline Pitest run.
-     *
-     * <p>Tests generated by the LLM extend {@code AbstractIT} (suitable for the final output
-     * module). For the inline Pitest run we need self-contained classes: Pitest forks its own
-     * JVM and may not invoke {@code @BeforeAll} methods declared in abstract parent classes,
-     * which would leave {@code RestAssured.port} unset and break all HTTP calls.
-     *
-     * <p>We therefore write a concrete, standalone version of each test class that inlines the
-     * RestAssured setup instead of inheriting it.
+     * Writes all generated test files (including AbstractIT) to the target project's test directory.
+     * AbstractIT is generated with {@code @SpringBootTest(RANDOM_PORT)} so Spring starts inside
+     * the Pitest JVM — the only way Pitest can instrument production code and track mutation coverage.
      */
-    private void writeTestFiles(List<GeneratedTest> tests, Path repoPath, int port)
+    private void writeTestFiles(List<GeneratedTest> tests, Path repoPath, int portUnused)
             throws IOException {
         for (GeneratedTest test : tests) {
-            String source = test.getSourceCode()
-                    .replace("__BACKEND_PORT__", String.valueOf(port));
-            source = inlineRestAssuredSetup(source, port);
             Path target = repoPath.resolve(test.getRelativeFilePath());
             Files.createDirectories(target.getParent());
-            Files.writeString(target, source);
+            Files.writeString(target, test.getSourceCode());
             log.debug("  Wrote {}", test.getRelativeFilePath());
         }
-    }
-
-    /**
-     * Transforms a test class that extends {@code AbstractIT} into a self-contained class:
-     * <ul>
-     *   <li>Removes {@code extends AbstractIT}</li>
-     *   <li>Adds {@code RestAssured.baseURI} and {@code RestAssured.port} setup to the first
-     *       {@code @BeforeAll} method found (or adds a new one if none exists)</li>
-     *   <li>Adds the required imports if not already present</li>
-     * </ul>
-     */
-    private String inlineRestAssuredSetup(String source, int port) {
-        if (!source.contains("extends AbstractIT")) {
-            return source; // already self-contained
-        }
-
-        // Remove "extends AbstractIT"
-        source = source.replaceAll("\\s+extends\\s+AbstractIT", "");
-
-        String portSetup = String.format(
-                "        RestAssured.baseURI = \"http://localhost\";%n" +
-                "        RestAssured.port    = %d;%n", port);
-
-        // Inject at the start of the first @BeforeAll method body
-        if (source.contains("@BeforeAll")) {
-            // Find the opening brace of the first @BeforeAll method and inject after it
-            source = source.replaceFirst(
-                    "(@BeforeAll\\s+static\\s+void\\s+\\w+\\s*\\(\\s*\\)\\s*\\{)",
-                    "$1\n" + portSetup);
-        } else {
-            // No @BeforeAll exists — add one
-            String packageName = derivePackage(source);
-            String newMethod = String.format(
-                    "%n    @BeforeAll%n    static void setUpRestAssured() {%n%s    }%n",
-                    portSetup);
-            // Insert before the first @Test
-            source = source.replaceFirst("(\\s+@Test)", "\n" + newMethod + "$1");
-        }
-
-        // Ensure required imports are present
-        source = ensureImport(source, "import io.restassured.RestAssured;");
-        source = ensureImport(source, "import org.junit.jupiter.api.BeforeAll;");
-
-        return source;
-    }
-
-    private String ensureImport(String source, String importLine) {
-        if (source.contains(importLine)) return source;
-        // Insert after the last existing import line
-        int lastImport = source.lastIndexOf("\nimport ");
-        if (lastImport == -1) return source;
-        int insertAt = source.indexOf('\n', lastImport + 1);
-        return source.substring(0, insertAt) + "\n" + importLine + source.substring(insertAt);
-    }
-
-    private String derivePackage(String sourceCode) {
-        for (String line : sourceCode.split("\n")) {
-            line = line.strip();
-            if (line.startsWith("package ") && line.endsWith(";")) {
-                return line.substring("package ".length(), line.length() - 1).strip();
-            }
-        }
-        return "";
     }
 
     /**
@@ -579,6 +546,10 @@ public class MutationLoopService {
             }
         }
 
+        // Deduplicate: skip methods whose name already appears in the existing source
+        newMethods = deduplicateMethods(existingSource, newMethods);
+        if (newMethods.isBlank()) return existingSource;
+
         int lastBrace = existingSource.lastIndexOf('}');
         if (lastBrace < 0) return existingSource + "\n\n" + newMethods;
 
@@ -588,10 +559,72 @@ public class MutationLoopService {
                 + "\n}";
     }
 
+    /**
+     * Removes methods from {@code newMethods} whose name already exists in {@code existing}.
+     * Matches on "void methodName(" to detect duplicates.
+     */
+    private String deduplicateMethods(String existing, String newMethods) {
+        // Split newMethods into individual method blocks (split on @Test boundaries)
+        java.util.regex.Pattern methodPattern =
+                java.util.regex.Pattern.compile("@Test[\\s\\S]*?(?=@Test|\\z)", java.util.regex.Pattern.DOTALL);
+        java.util.regex.Matcher m = methodPattern.matcher(newMethods);
+        StringBuilder result = new StringBuilder();
+        while (m.find()) {
+            String block = m.group();
+            // Extract method name: "void someName("
+            java.util.regex.Matcher nameMatcher =
+                    java.util.regex.Pattern.compile("void\\s+(\\w+)\\s*\\(").matcher(block);
+            if (nameMatcher.find()) {
+                String name = nameMatcher.group(1);
+                if (!existing.contains("void " + name + "(")) {
+                    result.append(block).append("\n");
+                }
+            } else {
+                result.append(block).append("\n");
+            }
+        }
+        return result.toString().strip();
+    }
+
     private int countTestMethods(String code) {
         int count = 0;
         int idx   = 0;
         while ((idx = code.indexOf("@Test", idx)) >= 0) { count++; idx++; }
         return count;
+    }
+
+    /**
+     * Removes all {@code @Test}-annotated methods from a source file.
+     * Used to strip rogue test methods from AbstractIT added by augmentTests.
+     */
+    private String stripTestMethods(String code) {
+        String[] lines = code.split("\n", -1);
+        java.util.List<String> result = new java.util.ArrayList<>();
+        int i = 0;
+        while (i < lines.length) {
+            String trimmed = lines[i].trim();
+            if (trimmed.equals("@Test") || trimmed.startsWith("@Test(")) {
+                while (i < lines.length && !lines[i].contains("{")) i++;
+                int depth = 0;
+                while (i < lines.length) {
+                    for (char c : lines[i].toCharArray()) {
+                        if (c == '{') depth++;
+                        else if (c == '}') depth--;
+                    }
+                    i++;
+                    if (depth == 0) break;
+                }
+                if (i < lines.length && lines[i].trim().isEmpty()) i++;
+            } else {
+                result.add(lines[i]);
+                i++;
+            }
+        }
+        String stripped = String.join("\n", result);
+        // Remove @Test import if no @Test annotations remain
+        if (!stripped.contains("@Test")) {
+            stripped = stripped.replaceAll("import org\\.junit\\.jupiter\\.api\\.Test;\\s*\\n", "");
+        }
+        return stripped;
     }
 }

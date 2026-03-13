@@ -7,6 +7,7 @@ public class Skill {
         RESTASSURED_TEST,
         MUTATION_GAP_ANALYSIS,
         TEST_IMPROVEMENT,
+        ABSTRACT_IT,
         CUSTOM
     }
 

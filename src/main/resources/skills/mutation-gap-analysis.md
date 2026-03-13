@@ -43,3 +43,10 @@ Prefix with `mutation_` to make the intent clear:
 - Every new test must kill at least one of the listed mutants
 - The test must fail when the mutation is active
 - The test must pass on the original code
+
+## Critical constraints
+- NEVER reference application classes (entities, DTOs, request/response objects like `Message`, `User`, `LoginRequest`, etc.)
+- Use only RestAssured methods with raw JSON strings or primitive values
+- Use `given().body("{\"field\": \"value\"}")` — never `given().body(new SomeDto(...))`
+- All referenced variables must come from the existing test class (e.g., `token`, `testUsername`, `testPassword`)
+- Do NOT set `contentType(ContentType.JSON)` on GET requests — it causes inconsistent behavior across environments
