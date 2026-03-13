@@ -22,20 +22,43 @@ import static org.hamcrest.Matchers.*;
 Only include `import java.util.Set;` if you actually use `Set` in the test class. Only include `import java.util.List;` if you actually use `List`.
 Do NOT import `io.restassured.RestAssured` or `org.junit.jupiter.api.BeforeAll` unless you have authentication setup (see below).
 
-### Request body: use DTO classes, not raw JSON strings
+### Request body: use DTO factory methods, not inline field-filling
 When an endpoint has a request body with a known DTO type and import path (e.g. `LoginRequest (import: io.example.request.LoginRequest)`):
-- Import the DTO class and instantiate it:
-  ```java
-  import io.example.request.LoginRequest;
-  ...
-  LoginRequest req = new LoginRequest();
-  req.setUsername("testuser");
-  req.setPassword("Test1234!");
-  given().contentType(ContentType.JSON).body(req)...
-  ```
-- For the "empty body" test, send a raw empty string: `.body("{}")`
-- For the "invalid fields" test, instantiate the DTO with deliberately invalid values (empty strings, invalid format)
-- If no import path is available, fall back to a raw JSON string
+
+1. **Declare a private static factory method** at the bottom of the test class that returns a fully valid instance with sensible defaults. Fields that must be unique (username, email, slug, code, …) use a UUID-based value:
+   ```java
+   private static LoginRequest validLoginRequest() {
+       String unique = java.util.UUID.randomUUID().toString().substring(0, 8);
+       LoginRequest req = new LoginRequest();
+       req.setUsername("user_" + unique);
+       req.setEmail("user_" + unique + "@example.com");
+       req.setPassword("Test1234!");
+       return req;
+   }
+   ```
+
+2. **In each test, call the factory and override only what that test needs:**
+   ```java
+   @Test
+   void createUser_invalidEmail_returns400() {
+       LoginRequest req = validLoginRequest();
+       req.setEmail("not-an-email");
+       given().contentType(ContentType.JSON).body(req)
+              .post("/api/users")
+              .then().statusCode(400);
+   }
+
+   @Test
+   void createUser_happyPath_returns201() {
+       given().contentType(ContentType.JSON).body(validLoginRequest())
+              .post("/api/users")
+              .then().statusCode(anyOf(is(200), is(201)));
+   }
+   ```
+
+3. For the "empty body" test, send a raw empty JSON string — do NOT use the factory: `.body("{}")`
+4. If no import path is available, fall back to a raw JSON string (no factory needed).
+5. **One factory method per DTO type** — reuse it across all tests in the class that use the same DTO.
 
 ### Class structure
 - **Every generated test class MUST extend `AbstractIT`**:
@@ -143,3 +166,4 @@ Before returning code, verify internally:
 - Are all imported classes actually used?
 - Does the class extend `AbstractIT`?
 - Is there NO `@BeforeAll` setting `RestAssured.baseURI` or `RestAssured.port`?
+- Is there a factory method for each DTO type used, and do tests call it instead of filling fields inline?
