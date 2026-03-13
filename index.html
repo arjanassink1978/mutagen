@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Mutagen - AI API Test Generator</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Mutagen - AI-powered API test generator for Spring Boot. Generates RestAssured tests, runs mutation testing, and opens PRs automatically.">
+    <link rel="icon" href="https://raw.githubusercontent.com/arjanassink1978/mutagen/main/logo.svg">
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; margin: 0; padding: 0; color: #333; }
+        header { background: #4F46E5; color: white; padding: 2rem; text-align: center; }
+        header h1 { margin: 0; font-size: 2.5rem; }
+        header p { font-size: 1.2rem; margin-top: 0.5rem; }
+        main { padding: 2rem; max-width: 900px; margin: auto; }
+        img.demo { max-width: 100%; border-radius: 8px; }
+        a.button { background: #4F46E5; color: white; padding: 0.75rem 1.5rem; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block; margin-top: 1rem; }
+        section { margin-bottom: 3rem; }
+        footer { background: #f4f4f4; padding: 1rem; text-align: center; font-size: 0.9rem; }
+        .badges img { margin-right: 0.5rem; vertical-align: middle; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>Mutagen</h1>
+    <p>AI-powered API test generator for Spring Boot</p>
+    <div class="badges">
+        <img src="https://img.shields.io/badge/java-21-orange" alt="Java 21">
+        <img src="https://img.shields.io/badge/mutation-pitest-green" alt="Mutation testing">
+        <img src="https://img.shields.io/badge/license-MIT-blue" alt="License MIT">
+        <img src="https://img.shields.io/badge/AI-Claude%20%7C%20OpenAI-purple" alt="AI">
+    </div>
+    <br>
+    <a href="https://github.com/arjanassink1978/mutagen" class="button">⭐ Star on GitHub</a>
+</header>
+
+<main>
+
+    <section>
+        <h2>What is Mutagen?</h2>
+        <p>
+            Mutagen automates API testing for Spring Boot projects. It discovers REST endpoints, generates
+            <strong>RestAssured tests</strong>, runs <strong>mutation testing</strong> to detect weak spots,
+            and opens a PR/MR with improved tests.
+        </p>
+    </section>
+
+    <section>
+        <h2>Demo</h2>
+        <p>See Mutagen in action:</p>
+        <img src="https://raw.githubusercontent.com/arjanassink1978/mutagen/main/demo.gif" class="demo" alt="Mutagen demo GIF">
+    </section>
+
+    <section>
+        <h2>Quick Start</h2>
+        <p>Bring your own key (BYOK):</p>
+        <pre>
+export ANTHROPIC_API_KEY=sk-ant-...
+# or
+export OPENAI_API_KEY=sk-...
+java -jar mutagen.jar /path/to/repo mutate
+  </pre>
+        <a href="https://github.com/arjanassink1978/mutagen" class="button">Get Started on GitHub</a>
+    </section>
+
+    <section>
+        <h2>License</h2>
+        <p>This project is licensed under the <strong>MIT License</strong>. See the <code>LICENSE</code> file for details.</p>
+    </section>
+
+</main>
+
+<footer>
+    © 2026 Arjan Assink — MIT Licensed Open Source Project
+</footer>
+
+</body>
+</html>
