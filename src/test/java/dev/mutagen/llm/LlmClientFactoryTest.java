@@ -4,7 +4,6 @@ import dev.mutagen.llm.client.LlmClientFactory;
 import dev.mutagen.llm.client.LlmException;
 import dev.mutagen.llm.provider.AnthropicLlmClient;
 import dev.mutagen.llm.provider.OpenAiLlmClient;
-import dev.mutagen.llm.provider.ProxyLlmClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -39,8 +38,7 @@ class LlmClientFactoryTest {
     void fromEnvironment_noKeysConfigured_throwsLlmException() {
         // Deze test faalt als er wél een key in de omgeving staat.
         // In dat geval wordt de test overgeslagen.
-        boolean anyKeyPresent = System.getenv("TESTGEN_API_KEY") != null
-                || System.getenv("ANTHROPIC_API_KEY") != null
+        boolean anyKeyPresent = System.getenv("ANTHROPIC_API_KEY") != null
                 || System.getenv("OPENAI_API_KEY") != null;
 
         if (anyKeyPresent) {

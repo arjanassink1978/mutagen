@@ -38,13 +38,20 @@ Add your API key as a masked CI/CD variable in `Settings → CI/CD → Variables
 |---|---|
 | `ANTHROPIC_API_KEY` | Claude API key (recommended) |
 | `OPENAI_API_KEY` | OpenAI API key (alternative) |
-| `TESTGEN_API_KEY` | Mutagen hosted key (coming soon) |
 
 ### Local
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-java -jar mutagen.jar /path/to/your/repo
+
+# Full run: generate tests + run Pitest mutation loop
+java -jar mutagen.jar mutate /path/to/your/repo
+
+# Only generate tests (no mutation testing)
+java -jar mutagen.jar generate /path/to/your/repo
+
+# Only scan endpoints (writes endpoints.json)
+java -jar mutagen.jar parse /path/to/your/repo
 ```
 
 ---
@@ -55,9 +62,8 @@ Mutagen picks the provider based on the first environment variable it finds:
 
 | Priority | Variable | Provider |
 |---|---|---|
-| 1 | `TESTGEN_API_KEY` | Mutagen hosted (managed Claude) |
-| 2 | `ANTHROPIC_API_KEY` | Anthropic Claude (BYOK) |
-| 3 | `OPENAI_API_KEY` | OpenAI GPT-4o (BYOK) |
+| 1 | `ANTHROPIC_API_KEY` | Anthropic Claude (recommended) |
+| 2 | `OPENAI_API_KEY` | OpenAI GPT-4o |
 
 Optional overrides:
 
@@ -65,7 +71,6 @@ Optional overrides:
 ANTHROPIC_MODEL=claude-opus-4-5           # default: claude-sonnet-4-20250514
 OPENAI_MODEL=gpt-4-turbo                  # default: gpt-4o
 OPENAI_BASE_URL=https://...openai.azure.com/...  # Azure OpenAI
-TESTGEN_BASE_URL=https://your-proxy.com   # self-hosted proxy
 ```
 
 ---
@@ -139,7 +144,7 @@ Requirements: Java 21, Maven 3.9+
 git clone https://gitlab.com/mutagen-dev/mutagen.git
 cd mutagen
 mvn package -q
-java -jar target/mutagen.jar /path/to/repo
+java -jar target/mutagen.jar mutate /path/to/repo
 ```
 
 ---
@@ -169,14 +174,13 @@ src/main/resources/skills/
 ## Roadmap
 
 - [x] Endpoint parser (AST-based, Spring Boot)
-- [x] Multi-provider LLM client (Anthropic, OpenAI, proxy)
+- [x] Multi-provider LLM client (Anthropic, OpenAI)
 - [x] Skill system with user overrides
 - [x] RestAssured test generator
 - [x] Pitest mutation loop (subprocess, XML report parsing, LLM gap-fill)
 - [x] GitLab MR integration
 - [x] GitHub PR integration
 - [ ] GitLab CI/CD Catalog component
-- [ ] Hosted proxy (mutagen.dev)
 
 ---
 

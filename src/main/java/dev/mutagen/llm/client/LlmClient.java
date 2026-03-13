@@ -7,8 +7,7 @@ import dev.mutagen.llm.model.LlmResponse;
  * Provider-agnostic interface for all LLM communication.
  *
  * <p>Implementations: {@link dev.mutagen.llm.provider.AnthropicLlmClient},
- * {@link dev.mutagen.llm.provider.OpenAiLlmClient},
- * {@link dev.mutagen.llm.provider.ProxyLlmClient}.
+ * {@link dev.mutagen.llm.provider.OpenAiLlmClient}.
  *
  * <p>Use {@link LlmClientFactory#fromEnvironment()} to get the right implementation.
  */
