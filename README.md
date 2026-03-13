@@ -45,13 +45,13 @@ Add your API key as a masked CI/CD variable in `Settings → CI/CD → Variables
 export ANTHROPIC_API_KEY=sk-ant-...
 
 # Full run: generate tests + run Pitest mutation loop
-java -jar mutagen.jar mutate /path/to/your/repo
+java -jar mutagen.jar /path/to/your/repo mutate
 
 # Only generate tests (no mutation testing)
-java -jar mutagen.jar generate /path/to/your/repo
+java -jar mutagen.jar /path/to/your/repo generate
 
 # Only scan endpoints (writes endpoints.json)
-java -jar mutagen.jar parse /path/to/your/repo
+java -jar mutagen.jar /path/to/your/repo parse
 ```
 
 ---
@@ -141,10 +141,10 @@ In GitLab, set `ANTHROPIC_API_KEY` as a **masked** and **protected** variable un
 Requirements: Java 21, Maven 3.9+
 
 ```bash
-git clone https://gitlab.com/mutagen-dev/mutagen.git
+git clone https://github.com/arjanassink1978/mutagen.git
 cd mutagen
 mvn package -q
-java -jar target/mutagen.jar mutate /path/to/repo
+java -jar target/mutagen.jar /path/to/repo mutate
 ```
 
 ---
