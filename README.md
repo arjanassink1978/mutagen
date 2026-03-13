@@ -348,4 +348,7 @@ This tool mutates your test suite — and **kills the mutants**.
 
 # License
 
-MIT
+This project is licensed under the **MIT License**.
+
+You are free to use, modify and distribute it.  
+See the `LICENSE` file for details.
