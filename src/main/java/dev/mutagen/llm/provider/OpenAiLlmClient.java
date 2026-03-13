@@ -27,7 +27,7 @@ public class OpenAiLlmClient implements LlmClient {
 
     private static final Logger log = LoggerFactory.getLogger(OpenAiLlmClient.class);
     private static final String DEFAULT_BASE_URL = "https://api.openai.com";
-    private static final String DEFAULT_MODEL    = "gpt-4o";
+    private static final String DEFAULT_MODEL    = "gpt-4.1-turbo";
 
     private final String apiKey;
     private final String model;

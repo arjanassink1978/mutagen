@@ -200,7 +200,7 @@ Optional overrides:
 
 ```bash
 ANTHROPIC_MODEL=claude-opus-4-5
-OPENAI_MODEL=gpt-4-turbo
+OPENAI_MODEL=gpt-4.1-turbo
 OPENAI_BASE_URL=https://...openai.azure.com
 ```
 
