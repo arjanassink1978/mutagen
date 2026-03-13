@@ -123,17 +123,28 @@ public class MavenModuleWriter {
     }
 
     /**
-     * Reads the Spring Boot version from {@code <dependencyManagement>}, checking both
-     * {@code spring-boot-starter-parent} and {@code spring-boot-dependencies} artifact ids.
+     * Reads the Spring Boot version from multiple locations:
+     * 1. {@code <dependencyManagement>} BOM (spring-boot-starter-parent or spring-boot-dependencies)
+     * 2. {@code <build><plugins>} — spring-boot-maven-plugin version
      */
     private String readSpringBootVersion(Document doc, XPath xpath) throws Exception {
+        // 1. dependencyManagement BOM
         for (String artifactId : List.of("spring-boot-starter-parent", "spring-boot-dependencies")) {
             String v = xpath.evaluate(
                     "/project/dependencyManagement/dependencies/dependency" +
                     "[artifactId='" + artifactId + "']/version", doc).strip();
             if (!v.isBlank()) return v;
         }
-        return "";
+        // 2. build plugin (spring-boot-maven-plugin)
+        String v = xpath.evaluate(
+                "/project/build/plugins/plugin[artifactId='spring-boot-maven-plugin']/version",
+                doc).strip();
+        if (!v.isBlank()) return v;
+        // 3. pluginManagement
+        v = xpath.evaluate(
+                "/project/build/pluginManagement/plugins/plugin[artifactId='spring-boot-maven-plugin']/version",
+                doc).strip();
+        return v;
     }
 
     private String readXpath(Path pomPath, String expression) throws IOException {

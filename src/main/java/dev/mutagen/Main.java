@@ -19,6 +19,7 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
@@ -103,11 +104,30 @@ public class Main implements Callable<Integer> {
         // Clean up injected dependencies from target pom
         PitestRunner.cleanupInjectedDependencies(repoPath);
 
+        // Remove temporary test files written to the target project during the mutation loop
+        cleanupInjectedTestFiles(repoPath, loopResult.tests());
+
         // Write final tests to separate Maven module
         Path outputDir = outputPath != null ? outputPath : repoPath;
         new MavenModuleWriter().write(outputDir, loopResult.tests(), loopResult.backendPort());
 
         return loopResult.thresholdMet(threshold) ? 0 : 1;
+    }
+
+    /**
+     * Deletes the test files that were written into the target project during the mutation loop.
+     * The final tests live in the {@code rest-assured-tests} Maven module instead.
+     */
+    private void cleanupInjectedTestFiles(Path repoPath, List<GeneratedTest> tests) {
+        for (GeneratedTest test : tests) {
+            Path file = repoPath.resolve(test.getRelativeFilePath());
+            try {
+                Files.deleteIfExists(file);
+                log.debug("Cleaned up {}", file);
+            } catch (IOException e) {
+                log.warn("Could not delete injected test file {}: {}", file, e.getMessage());
+            }
+        }
     }
 
     @Override
