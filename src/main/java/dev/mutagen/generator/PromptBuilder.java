@@ -44,9 +44,16 @@ public class PromptBuilder {
             sb.append("```java\n");
             sb.append(authSetupInfo.toJavaBeforeAllBody());
             sb.append("```\n\n");
-        } else if (needsAuth && !authEndpoints.isEmpty()) {
-            sb.append("## Auth endpoints (use these in @BeforeAll to obtain a JWT token)\n\n");
-            authEndpoints.forEach(e -> sb.append(formatEndpoint(e)).append("\n"));
+        } else if (needsAuth) {
+            // Auth probing failed or was skipped — tell the LLM to derive it from available info
+            sb.append("## Auth setup (NOT verified — derive from the endpoint descriptions below)\n");
+            sb.append("> Note: automated auth probing could not discover a working login flow for this project.\n");
+            sb.append("> Build the @BeforeAll setup yourself using the auth endpoints listed below.\n");
+            sb.append("> Use raw JSON strings (not DTO factory methods), include all required fields, and\n");
+            sb.append("> use a UUID-based unique username/email per run.\n\n");
+            if (!authEndpoints.isEmpty()) {
+                authEndpoints.forEach(e -> sb.append(formatEndpoint(e)).append("\n"));
+            }
         }
 
         sb.append("## Endpoints (").append(endpoints.size()).append(" total)\n\n");
