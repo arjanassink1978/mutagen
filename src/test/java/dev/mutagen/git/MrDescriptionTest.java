@@ -83,7 +83,7 @@ class MrDescriptionTest {
     // ------------------------------------------------------------------
 
     private MutationLoopResult loopResult(double initial, double finalScore, int iterations) {
-        return new MutationLoopResult(twoTests(), initial, finalScore, iterations, new MutationReport());
+        return new MutationLoopResult(twoTests(), initial, finalScore, iterations, new MutationReport(), 0);
     }
 
     private List<GeneratedTest> twoTests() {

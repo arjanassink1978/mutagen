@@ -105,7 +105,7 @@ public class Main implements Callable<Integer> {
 
         // Write final tests to separate Maven module
         Path outputDir = outputPath != null ? outputPath : repoPath;
-        new MavenModuleWriter().write(outputDir, loopResult.tests());
+        new MavenModuleWriter().write(outputDir, loopResult.tests(), loopResult.backendPort());
 
         return loopResult.thresholdMet(threshold) ? 0 : 1;
     }

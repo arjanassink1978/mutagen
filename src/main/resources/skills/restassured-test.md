@@ -12,9 +12,7 @@ Output starts with `package` and ends with the last `}`.
 
 ### Required imports
 ```
-import io.restassured.RestAssured;
 import io.restassured.http.ContentType;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Set;
@@ -22,6 +20,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 ```
 Only include `import java.util.Set;` if you actually use `Set` in the test class. Only include `import java.util.List;` if you actually use `List`.
+Do NOT import `io.restassured.RestAssured` or `org.junit.jupiter.api.BeforeAll` unless you have authentication setup (see below).
 
 ### Request body: use DTO classes, not raw JSON strings
 When an endpoint has a request body with a known DTO type and import path (e.g. `LoginRequest (import: io.example.request.LoginRequest)`):
@@ -39,15 +38,14 @@ When an endpoint has a request body with a known DTO type and import path (e.g. 
 - If no import path is available, fall back to a raw JSON string
 
 ### Class structure
-- Use `@BeforeAll` (static) to configure RestAssured:
+- **Every generated test class MUST extend `AbstractIT`**:
   ```java
-  @BeforeAll
-  static void setUp() {
-      RestAssured.baseURI = "http://localhost";
-      RestAssured.port    = __BACKEND_PORT__;
+  public class UserApiIT extends AbstractIT {
+      // tests here — no @BeforeAll for port/baseURI needed
   }
   ```
-- The literal `__BACKEND_PORT__` is a placeholder — do NOT replace it with a number
+- `AbstractIT` (in the same package) configures `RestAssured.baseURI` and `RestAssured.port` once for all tests.
+- Do NOT add a `@BeforeAll` that sets `RestAssured.baseURI` or `RestAssured.port` — that is handled by `AbstractIT`.
 - Class name ends with `IT` (integration test convention)
 - No `@SpringBootTest`, no `MockMvc`, no Spring context — this is a black-box HTTP test
 
@@ -55,31 +53,33 @@ When an endpoint has a request body with a known DTO type and import path (e.g. 
 The tests run against a live backend. If **any** endpoint in the controller is marked "⚠ Requires authentication":
 
 1. Look for a sign-up and sign-in endpoint in the provided endpoint list (typically `POST /api/auth/signup` and `POST /api/auth/signin`, or similar).
-2. In `@BeforeAll`, register a test user and obtain a JWT token:
+2. Add a `@BeforeAll` **only** to set up the auth token (do NOT set baseURI/port — `AbstractIT` already does that):
    ```java
-   private static String token;
+   import io.restassured.RestAssured;
+   import org.junit.jupiter.api.BeforeAll;
+   ...
+   public class UserApiIT extends AbstractIT {
 
-   @BeforeAll
-   static void setUp() {
-       RestAssured.baseURI = "http://localhost";
-       RestAssured.port    = __BACKEND_PORT__;
+       private static String token;
 
-       // Use a unique username per run so tests are idempotent against any database (in-memory or persistent)
-       String uniqueUser = "testuser_" + java.util.UUID.randomUUID().toString().substring(0, 8);
-       String uniqueEmail = uniqueUser + "@example.com";
+       @BeforeAll
+       static void setUpAuth() {
+           // Use a unique username per run so tests are idempotent against any database (in-memory or persistent)
+           String uniqueUser = "testuser_" + java.util.UUID.randomUUID().toString().substring(0, 8);
+           String uniqueEmail = uniqueUser + "@example.com";
 
-       // Register test user — always succeeds because the username is unique
-       given().contentType(ContentType.JSON)
-              .body("{\"username\":\"" + uniqueUser + "\",\"email\":\"" + uniqueEmail + "\",\"password\":\"Test1234!\"}")
-              .post("/api/auth/signup");
+           // Register test user — always succeeds because the username is unique
+           given().contentType(ContentType.JSON)
+                  .body("{\"username\":\"" + uniqueUser + "\",\"email\":\"" + uniqueEmail + "\",\"password\":\"Test1234!\"}")
+                  .post("/api/auth/signup");
 
-       // Sign in and capture token — use the field name from the response (commonly "token" or "accessToken")
-       token = given().contentType(ContentType.JSON)
-                      .body("{\"username\":\"" + uniqueUser + "\",\"password\":\"Test1234!\"}")
-                      .post("/api/auth/signin")
-                      .then().statusCode(200)
-                      .extract().path("token");
-   }
+           // Sign in and capture token — use the field name from the response (commonly "token" or "accessToken")
+           token = given().contentType(ContentType.JSON)
+                          .body("{\"username\":\"" + uniqueUser + "\",\"password\":\"Test1234!\"}")
+                          .post("/api/auth/signin")
+                          .then().statusCode(200)
+                          .extract().path("token");
+       }
    ```
    When using DTO classes instead of raw JSON strings, declare `uniqueUser` and `uniqueEmail` as `static` fields and set them before `@BeforeAll` runs, then use setter methods on the DTO.
 3. For every request to an authenticated endpoint, add `.header("Authorization", "Bearer " + token)`.
@@ -99,6 +99,13 @@ The tests run against a live backend. If **any** endpoint in the controller is m
 
 **POST/PUT/PATCH endpoints:**
 1. Happy path — valid body, expect 200 or 201
+   - **IMPORTANT**: any field that must be unique in the database (username, email, name, code, slug, etc.) MUST use a UUID-based value to ensure the test is idempotent across repeated runs:
+     ```java
+     String unique = java.util.UUID.randomUUID().toString().substring(0, 8);
+     req.setUsername("user_" + unique);
+     req.setEmail("user_" + unique + "@example.com");
+     ```
+   - This applies to all POST tests that create resources, not just auth setup.
 2. Empty body — expect 400
 3. Invalid fields — expect 400 (if `@Valid` is present, test a clear constraint violation)
 
@@ -121,7 +128,8 @@ Examples:
 
 ### What you must NOT do
 - No Mockito, no @MockBean, no Spring context
-- No hardcoded ports (use `__BACKEND_PORT__` placeholder)
+- No hardcoded ports
+- No `@BeforeAll` that sets `RestAssured.baseURI` or `RestAssured.port` — use `AbstractIT` for that
 - No `Thread.sleep()`
 - No empty test bodies
 - No System.out.println
@@ -133,4 +141,5 @@ Before returning code, verify internally:
 - Does the code compile without changes?
 - Does every `@Test` method have at least one assertion?
 - Are all imported classes actually used?
-- Is `__BACKEND_PORT__` used as the port (not a number)?
+- Does the class extend `AbstractIT`?
+- Is there NO `@BeforeAll` setting `RestAssured.baseURI` or `RestAssured.port`?

@@ -30,6 +30,10 @@ public class MavenModuleWriter {
     static final String MODULE_NAME = "rest-assured-tests";
 
     public void write(Path repoRoot, List<GeneratedTest> tests) throws IOException {
+        write(repoRoot, tests, 0);
+    }
+
+    public void write(Path repoRoot, List<GeneratedTest> tests, int port) throws IOException {
         Path targetPomPath = repoRoot.resolve("pom.xml");
         PomInfo targetPom = readPomInfo(targetPomPath);
         log.info("Target project: {}:{}:{} (Java {}, Spring Boot {})",
@@ -49,7 +53,8 @@ public class MavenModuleWriter {
         String moduleRef = parentPomPath.getParent().relativize(moduleDir).toString();
 
         writeModulePom(moduleDir, parentPom, parentRelativePath, targetPom);
-        writeTestFiles(moduleDir, tests);
+        writeAbstractIT(moduleDir, tests, port);
+        writeTestFiles(moduleDir, tests, port);
         addModuleToParentPom(parentPomPath, moduleRef);
     }
 
@@ -253,13 +258,93 @@ public class MavenModuleWriter {
         log.info("Written: {}", pomPath);
     }
 
-    private void writeTestFiles(Path moduleDir, List<GeneratedTest> tests) throws IOException {
+    private void writeAbstractIT(Path moduleDir, List<GeneratedTest> tests, int port) throws IOException {
+        if (tests.isEmpty()) return;
+
+        // Derive the package from the first generated test
+        String packageName = derivePackage(tests.getFirst().getSourceCode());
+        if (packageName.isBlank()) return;
+
+        String packageDir = packageName.replace('.', '/');
+        Path abstractItPath = moduleDir.resolve("src/test/java/" + packageDir + "/AbstractIT.java");
+        Files.createDirectories(abstractItPath.getParent());
+
+        String portValue = port > 0 ? String.valueOf(port) : "8080";
+        String source = """
+                package %s;
+
+                import io.restassured.RestAssured;
+                import org.junit.jupiter.api.BeforeAll;
+
+                /**
+                 * Base class for RestAssured integration tests.
+                 * Configures baseURI and port once for all test classes.
+                 */
+                public abstract class AbstractIT {
+
+                    @BeforeAll
+                    static void setUpRestAssured() {
+                        RestAssured.baseURI = "http://localhost";
+                        RestAssured.port    = %s;
+                    }
+                }
+                """.formatted(packageName, portValue);
+
+        Files.writeString(abstractItPath, source);
+        log.info("Written: {}", abstractItPath);
+    }
+
+    private String derivePackage(String sourceCode) {
+        for (String line : sourceCode.split("\n")) {
+            line = line.strip();
+            if (line.startsWith("package ") && line.endsWith(";")) {
+                return line.substring("package ".length(), line.length() - 1).strip();
+            }
+        }
+        return "";
+    }
+
+    private void writeTestFiles(Path moduleDir, List<GeneratedTest> tests, int port) throws IOException {
         for (GeneratedTest test : tests) {
+            String source = test.getSourceCode();
+            if (port > 0) {
+                source = source.replace("__BACKEND_PORT__", String.valueOf(port));
+            }
+            // Strip per-class RestAssured setup — AbstractIT handles it
+            source = stripRestAssuredSetup(source);
             Path target = moduleDir.resolve(test.getRelativeFilePath());
             Files.createDirectories(target.getParent());
-            Files.writeString(target, test.getSourceCode());
+            Files.writeString(target, source);
             log.info("Written: {}", target);
         }
+    }
+
+    /**
+     * Removes the boilerplate {@code @BeforeAll static void setUp()} that sets
+     * {@code RestAssured.baseURI} and {@code RestAssured.port} from a generated test class,
+     * and replaces the class declaration to extend {@code AbstractIT}.
+     */
+    private String stripRestAssuredSetup(String source) {
+        // Replace "public class FooIT {" with "public class FooIT extends AbstractIT {"
+        source = source.replaceAll(
+                "public class (\\w+IT)\\s*\\{",
+                "public class $1 extends AbstractIT {");
+
+        // Remove unused RestAssured import if it was only used in setUp
+        // (keep it if it's used in test methods via `given()` or RestAssured.xxx)
+        // We can't easily detect this, so leave the import in place — it won't cause compile errors.
+
+        // Remove the @BeforeAll setUp block that only sets baseURI and port.
+        // Pattern: optional @BeforeAll, static void setUp() { RestAssured.baseURI = ...; RestAssured.port = ...; }
+        // We match a simple two-line body (possibly with token field lines before closing brace).
+        source = source.replaceAll(
+                "(?m)\\s*@BeforeAll\\s*\\n\\s*static void setUp\\(\\) \\{\\s*\\n" +
+                "\\s*RestAssured\\.baseURI\\s*=\\s*\"http://localhost\";\\s*\\n" +
+                "\\s*RestAssured\\.port\\s*=\\s*\\d+;\\s*\\n" +
+                "\\s*\\}",
+                "");
+
+        return source;
     }
 
     void addModuleToParentPom(Path pomPath, String moduleRef) throws IOException {

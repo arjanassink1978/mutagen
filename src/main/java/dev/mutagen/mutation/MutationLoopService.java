@@ -85,10 +85,11 @@ public class MutationLoopService {
         List<GeneratedTest> current = new ArrayList<>(tests);
         MutationReport report       = null;
         double initialScore         = -1;
+        int port                    = 0;
 
         BackendStarter backend = backendFactory.create(repoPath);
         try {
-            int port = backend.start();
+            port = backend.start();
             log.info("Backend started on port {}", port);
 
             current = validateAndFix(current, repoPath, port);
@@ -110,7 +111,7 @@ public class MutationLoopService {
 
                 if (score >= threshold) {
                     log.info("  Threshold met — stopping");
-                    return new MutationLoopResult(current, initialScore, score, iteration, report);
+                    return new MutationLoopResult(current, initialScore, score, iteration, report, port);
                 }
 
                 if (iteration == maxIterations) break;
@@ -129,7 +130,7 @@ public class MutationLoopService {
         }
 
         double finalScore = report != null ? report.getMutationScore() : 0;
-        return new MutationLoopResult(current, initialScore, finalScore, maxIterations, report);
+        return new MutationLoopResult(current, initialScore, finalScore, maxIterations, report, port);
     }
 
     // ---------------------------------------------------------------

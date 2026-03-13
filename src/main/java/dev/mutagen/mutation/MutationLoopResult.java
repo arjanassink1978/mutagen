@@ -13,13 +13,15 @@ import java.util.List;
  * @param finalScore    mutation score after the last pitest run
  * @param iterationsRun number of pitest runs executed (≥ 1)
  * @param lastReport    the last parsed {@link MutationReport}
+ * @param backendPort   the port the backend was running on during the mutation loop
  */
 public record MutationLoopResult(
         List<GeneratedTest> tests,
         double initialScore,
         double finalScore,
         int iterationsRun,
-        MutationReport lastReport
+        MutationReport lastReport,
+        int backendPort
 ) {
     public boolean thresholdMet(int threshold) {
         return finalScore >= threshold;
