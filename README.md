@@ -5,19 +5,23 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![AI](https://img.shields.io/badge/AI-Claude%20%7C%20OpenAI-purple)
 
-> **AI-powered API test generator for Spring Boot.**
+> **AI-powered API test generator for Spring Boot**
 
-Mutagen scans your repository, generates **RestAssured integration tests**, verifies them using **mutation testing**, and automatically opens a **GitHub PR or GitLab MR**.
+Mutagen scans your repository, generates **RestAssured integration tests**, validates them with **mutation testing**, and automatically opens a **GitHub PR or GitLab MR**.
 
 Unlike typical AI test generators, Mutagen **does not stop at generating tests**.
 
 It uses **mutation testing feedback loops** to improve tests until they actually detect bugs.
 
+⭐ **If you like the idea, consider starring the repository.**
+
 ---
 
-# What Mutagen does
+# Why Mutagen?
 
-Mutagen automates the entire API testing workflow:
+Writing high-quality API tests is slow and often incomplete.
+
+Mutagen automates the entire workflow:
 
 1. **Discovers endpoints** directly from your code using AST parsing  
 2. **Generates integration tests** using an LLM  
@@ -64,7 +68,7 @@ void getUser_returns200() {
 }
 ```
 
-Then runs mutation testing:
+Mutation testing then runs:
 
 ```
 Pitest mutation score: 62%
@@ -119,13 +123,30 @@ GitHub PR / GitLab MR
 
 ## Run locally
 
-Export your API key:
+Mutagen uses **BYOK (Bring Your Own Key)**.
+
+You can use your own LLM provider key. Mutagen **never proxies or stores your keys**.
+
+Supported providers:
+
+- **Anthropic (Claude)**
+- **OpenAI**
+
+Export one of the following environment variables.
+
+Anthropic:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Run Mutagen:
+OpenAI:
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+Then run Mutagen:
 
 ```bash
 java -jar mutagen.jar /path/to/repo mutate
@@ -236,7 +257,9 @@ export ANTHROPIC_API_KEY=sk-ant-...
 java -jar mutagen.jar .
 ```
 
-Never expose keys in command arguments.
+Never expose API keys in command arguments.
+
+Mutagen reads keys directly from the environment.
 
 ---
 
