@@ -52,9 +52,24 @@ public class AuthProber {
     /**
      * Attempts to discover a working auth flow from the given endpoint list.
      *
+     * <p>If {@code MUTAGEN_AUTH_USERNAME} and {@code MUTAGEN_AUTH_PASSWORD} environment variables
+     * are set, the signup phase is skipped entirely and those credentials are used directly for
+     * the signin probe. This is useful when signup is not publicly available or a test user
+     * already exists. Optionally set {@code MUTAGEN_AUTH_SIGNIN_PATH} to override the detected
+     * signin endpoint path.
+     *
      * @return {@link AuthSetupInfo} — call {@link AuthSetupInfo#isAvailable()} to check success
      */
     public AuthSetupInfo probe(List<EndpointInfo> allEndpoints) {
+        String fixedUsername = System.getenv("MUTAGEN_AUTH_USERNAME");
+        String fixedPassword = System.getenv("MUTAGEN_AUTH_PASSWORD");
+        String fixedSigninPath = System.getenv("MUTAGEN_AUTH_SIGNIN_PATH");
+
+        if (fixedUsername != null && fixedPassword != null) {
+            log.info("AuthProber: using provided credentials (MUTAGEN_AUTH_USERNAME / MUTAGEN_AUTH_PASSWORD)");
+            return probeWithCredentials(fixedUsername, fixedPassword, fixedSigninPath, allEndpoints);
+        }
+
         List<EndpointInfo> signupCandidates = findCandidates(allEndpoints, SIGNUP_KEYWORDS);
         List<EndpointInfo> signinCandidates = findCandidates(allEndpoints, SIGNIN_KEYWORDS);
 
@@ -104,6 +119,58 @@ public class AuthProber {
         }
 
         log.warn("AuthProber: could not discover a working auth flow");
+        return new AuthSetupInfo(null, null, null, null, null);
+    }
+
+    // ── Credentials override ─────────────────────────────────────────────────
+
+    /**
+     * Signs in with known credentials, skipping the signup phase entirely.
+     * Used when {@code MUTAGEN_AUTH_USERNAME} / {@code MUTAGEN_AUTH_PASSWORD} are set.
+     */
+    private AuthSetupInfo probeWithCredentials(String username, String password,
+                                                String signinPathOverride,
+                                                List<EndpointInfo> allEndpoints) {
+        List<EndpointInfo> signinCandidates = signinPathOverride != null
+                ? List.of()   // we'll use the override path directly
+                : findCandidates(allEndpoints, SIGNIN_KEYWORDS);
+
+        // Build the paths to try: override first, then discovered candidates
+        List<String> pathsToTry = new java.util.ArrayList<>();
+        if (signinPathOverride != null) pathsToTry.add(signinPathOverride);
+        signinCandidates.stream()
+                .map(EndpointInfo::getFullPath)
+                .filter(p -> !isSignupPath(p))
+                .forEach(pathsToTry::add);
+
+        if (pathsToTry.isEmpty()) {
+            log.warn("AuthProber: credentials provided but no signin path found — "
+                    + "set MUTAGEN_AUTH_SIGNIN_PATH to specify it");
+            return new AuthSetupInfo(null, null, null, null, null);
+        }
+
+        // Build signin body using the provided credentials
+        String usernameKey = username.contains("@") ? "email" : "username";
+        String signinBodyTemplate = "{\"" + usernameKey + "\":\"UNIQUE_USER\",\"password\":\"UNIQUE_PASS\"}";
+        String signinBody = signinBodyTemplate
+                .replace("UNIQUE_USER", username)
+                .replace("UNIQUE_PASS", password);
+
+        for (String path : pathsToTry) {
+            if (isSignupPath(path)) continue;
+            String result = postForBody(path, signinBody);
+            if (result == null) continue;
+
+            String tokenField = detectTokenField(result);
+            if (tokenField != null) {
+                log.info("AuthProber: signin with provided credentials succeeded at {} — token field: '{}'", path, tokenField);
+                // Build a template that uses the fixed credentials (no unique placeholder needed)
+                String template = "{\"" + usernameKey + "\":\"" + username + "\",\"password\":\"" + password + "\"}";
+                return new AuthSetupInfo(null, null, path, template, tokenField);
+            }
+        }
+
+        log.warn("AuthProber: signin with provided credentials failed on all candidates");
         return new AuthSetupInfo(null, null, null, null, null);
     }
 

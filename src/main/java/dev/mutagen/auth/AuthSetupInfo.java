@@ -30,9 +30,14 @@ public record AuthSetupInfo(
      * The caller is responsible for wrapping it in the method declaration.
      */
     public String toJavaBeforeAllBody() {
+        boolean needsUnique = (signupBodyTemplate != null && signupBodyTemplate.contains("UNIQUE"))
+                || (signinBodyTemplate != null && signinBodyTemplate.contains("UNIQUE"));
+
         StringBuilder sb = new StringBuilder();
-        sb.append("        String uniqueUser = \"testuser_\" + java.util.UUID.randomUUID().toString().substring(0, 8);\n");
-        sb.append("        String uniqueEmail = uniqueUser + \"@example.com\";\n");
+        if (needsUnique) {
+            sb.append("        String uniqueUser = \"testuser_\" + java.util.UUID.randomUUID().toString().substring(0, 8);\n");
+            sb.append("        String uniqueEmail = uniqueUser + \"@example.com\";\n");
+        }
 
         if (signupPath != null && signupBodyTemplate != null) {
             sb.append("\n");
