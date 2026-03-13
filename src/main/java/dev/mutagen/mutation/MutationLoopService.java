@@ -143,10 +143,13 @@ public class MutationLoopService {
                 if (iteration == maxIterations) break;
 
                 List<Mutant> survived = report.getSurvivedMutants();
-                if (survived.isEmpty()) break;
+                List<Mutant> noCoverage = report.getNoCoverageMutants();
+                List<Mutant> toFill = combineMutants(survived, noCoverage);
+                if (toFill.isEmpty()) break;
 
-                log.info("  Asking LLM to fill {} surviving mutant(s)...", survived.size());
-                current = augmentTests(current, survived, (int) score, threshold);
+                log.info("  Asking LLM to fill {} mutant(s) ({} survived, {} no-coverage)...",
+                        toFill.size(), survived.size(), Math.min(noCoverage.size(), toFill.size() - survived.size()));
+                current = augmentTests(current, toFill, (int) score, threshold);
                 current = validateAndFix(current, repoPath, port);
             }
         } catch (InterruptedException e) {
@@ -212,10 +215,13 @@ public class MutationLoopService {
             if (iteration == maxIterations) break;
 
             List<Mutant> survived = report.getSurvivedMutants();
-            if (survived.isEmpty()) break;
+            List<Mutant> noCoverage = report.getNoCoverageMutants();
+            List<Mutant> toFill = combineMutants(survived, noCoverage);
+            if (toFill.isEmpty()) break;
 
-            log.info("  Asking LLM to fill {} surviving mutant(s)...", survived.size());
-            current = augmentTests(current, survived, (int) score, threshold);
+            log.info("  Asking LLM to fill {} mutant(s) ({} survived, {} no-coverage)...",
+                    toFill.size(), survived.size(), Math.min(noCoverage.size(), toFill.size() - survived.size()));
+            current = augmentTests(current, toFill, (int) score, threshold);
             try {
                 current = validateAndFix(current, repoPath, 0);
             } catch (InterruptedException e) {
@@ -513,6 +519,18 @@ public class MutationLoopService {
      * A mutant is "relevant" to a test if they share a package prefix.
      * Controllers in {@code com.example.controller} are covered by a test in the same package.
      */
+    /**
+     * Combines survived and no-coverage mutants for the gap-fill prompt.
+     * Survived mutants are always included; no-coverage mutants are capped at 20
+     * per iteration to keep the LLM prompt manageable.
+     */
+    private List<Mutant> combineMutants(List<Mutant> survived, List<Mutant> noCoverage) {
+        List<Mutant> result = new java.util.ArrayList<>(survived);
+        int cap = Math.max(0, 20 - survived.size());
+        result.addAll(noCoverage.stream().limit(cap).toList());
+        return result;
+    }
+
     private boolean isRelevant(Mutant mutant, GeneratedTest test) {
         if (mutant.getMutatedClass() == null) return false;
         String mutantPkg = mutant.getMutatedClass().contains(".")

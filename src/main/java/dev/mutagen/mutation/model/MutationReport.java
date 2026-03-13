@@ -42,6 +42,12 @@ public class MutationReport {
                 .count();
     }
 
+    public List<Mutant> getNoCoverageMutants() {
+        return mutations.stream()
+                .filter(m -> m.getStatusEnum() == Mutant.Status.NO_COVERAGE)
+                .toList();
+    }
+
     public int getTotalCount() { return mutations.size(); }
 
     /**
