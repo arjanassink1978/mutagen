@@ -1,29 +1,150 @@
 # Mutagen
 
-> AI-powered API test generator for Spring Boot. Scans your repository, generates RestAssured integration tests, runs mutation testing, and opens a merge request — all in one CI step.
+![Java](https://img.shields.io/badge/java-21-orange)
+![Mutation Testing](https://img.shields.io/badge/mutation-pitest-green)
+![License](https://img.shields.io/badge/license-MIT-blue)
+![AI](https://img.shields.io/badge/AI-Claude%20%7C%20OpenAI-purple)
+
+> **AI-powered API test generator for Spring Boot.**
+
+Mutagen scans your repository, generates **RestAssured integration tests**, verifies them using **mutation testing**, and automatically opens a **GitHub PR or GitLab MR**.
+
+Unlike typical AI test generators, Mutagen **does not stop at generating tests**.
+
+It uses **mutation testing feedback loops** to improve tests until they actually detect bugs.
 
 ---
 
-## How it works
+# What Mutagen does
+
+Mutagen automates the entire API testing workflow:
+
+1. **Discovers endpoints** directly from your code using AST parsing  
+2. **Generates integration tests** using an LLM  
+3. **Runs mutation testing** to measure test quality  
+4. **Improves tests automatically** based on surviving mutants  
+5. **Creates a PR / MR** with the generated tests
+
+Result:
+
+- stronger test suites
+- higher mutation coverage
+- less manual test writing
+
+---
+
+# Example
+
+Input controller:
+
+```java
+@RestController
+@RequestMapping("/users")
+class UserController {
+
+    @GetMapping("/{id}")
+    User getUser(@PathVariable Long id) { ... }
+
+    @PostMapping
+    User createUser(@RequestBody CreateUserRequest req) { ... }
+}
+```
+
+Mutagen generates a test:
+
+```java
+@Test
+void getUser_returns200() {
+    given()
+        .pathParam("id", 1)
+    .when()
+        .get("/users/{id}")
+    .then()
+        .statusCode(200);
+}
+```
+
+Then runs mutation testing:
+
+```
+Pitest mutation score: 62%
+Surviving mutants detected in UserService
+```
+
+Mutagen generates **additional tests** to kill the remaining mutants.
+
+---
+
+# How it works
 
 ```
 Your repo
    │
-   ├── 1. PARSE      Scans @RestController classes via AST (no regex)
+   ├── 1. PARSE      Scans @RestController classes via AST
    ├── 2. GENERATE   Sends endpoint data to an LLM → writes RestAssured tests
-   ├── 3. MUTATE     Runs Pitest, analyses surviving mutants, fills coverage gaps
-   └── 4. MR         Opens a GitLab MR (or GitHub PR) with the generated tests
+   ├── 3. MUTATE     Runs Pitest mutation testing
+   └── 4. PR/MR      Opens GitHub PR or GitLab MR
 ```
 
-Mutagen is optimized for **Claude** (Anthropic) but also supports OpenAI and Azure OpenAI.
+Architecture overview:
+
+```
+Spring Boot repo
+      │
+      ▼
+AST Controller Parser
+      │
+      ▼
+Endpoint Model
+      │
+      ▼
+LLM Test Generator
+      │
+      ▼
+Generated RestAssured tests
+      │
+      ▼
+Pitest Mutation Testing
+      │
+      ▼
+LLM Mutation Gap Analysis
+      │
+      ▼
+GitHub PR / GitLab MR
+```
 
 ---
 
-## Quick start
+# Quick start
 
-### GitLab CI
+## Run locally
 
-Add to your `.gitlab-ci.yml`:
+Export your API key:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Run Mutagen:
+
+```bash
+java -jar mutagen.jar /path/to/repo mutate
+```
+
+Other commands:
+
+```bash
+java -jar mutagen.jar /path/to/repo generate
+java -jar mutagen.jar /path/to/repo parse
+```
+
+---
+
+# CI usage
+
+## GitLab CI
+
+Add to `.gitlab-ci.yml`:
 
 ```yaml
 include:
@@ -32,138 +153,133 @@ include:
       mutation_threshold: 80
 ```
 
-Add your API key as a masked CI/CD variable in `Settings → CI/CD → Variables`:
+Add your API key in:
+
+```
+Settings → CI/CD → Variables
+```
 
 | Variable | Description |
 |---|---|
-| `ANTHROPIC_API_KEY` | Claude API key (recommended) |
-| `OPENAI_API_KEY` | OpenAI API key (alternative) |
-
-### Local
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-
-# Full run: generate tests + run Pitest mutation loop
-java -jar mutagen.jar /path/to/your/repo mutate
-
-# Only generate tests (no mutation testing)
-java -jar mutagen.jar /path/to/your/repo generate
-
-# Only scan endpoints (writes endpoints.json)
-java -jar mutagen.jar /path/to/your/repo parse
-```
+| `ANTHROPIC_API_KEY` | Claude API key |
+| `OPENAI_API_KEY` | OpenAI API key |
 
 ---
 
-## LLM providers
+# LLM providers
 
-Mutagen picks the provider based on the first environment variable it finds:
+Mutagen automatically selects the provider based on environment variables.
 
 | Priority | Variable | Provider |
 |---|---|---|
-| 1 | `ANTHROPIC_API_KEY` | Anthropic Claude (recommended) |
-| 2 | `OPENAI_API_KEY` | OpenAI GPT-4o |
+| 1 | `ANTHROPIC_API_KEY` | Claude |
+| 2 | `OPENAI_API_KEY` | OpenAI |
 
 Optional overrides:
 
 ```bash
-ANTHROPIC_MODEL=claude-opus-4-5           # default: claude-sonnet-4-20250514
-OPENAI_MODEL=gpt-4-turbo                  # default: gpt-4o
-OPENAI_BASE_URL=https://...openai.azure.com/...  # Azure OpenAI
+ANTHROPIC_MODEL=claude-opus-4-5
+OPENAI_MODEL=gpt-4-turbo
+OPENAI_BASE_URL=https://...openai.azure.com
 ```
 
 ---
 
-## Configuration
+# Configuration
 
-Add a `mutagen.yml` to your repository root to override defaults:
+Create `mutagen.yml` in your repository:
 
 ```yaml
 source_paths:
   - src/main/java
+
 test_output_path: src/test/java
-mutation_threshold: 80        # minimum mutation score to aim for (%)
-max_mutation_iterations: 3    # how many gap-fill loops to run
-build_tool: maven             # maven | gradle
+
+mutation_threshold: 80
+max_mutation_iterations: 3
+
+build_tool: maven
 ```
 
 ---
 
-## Custom skills
+# Custom skills
 
-Mutagen uses skill files to drive code generation. The built-in skills work out of the box, but you can override them to match your team's conventions.
+Mutagen uses **skill files** to guide LLM generation.
 
-Create a `mutagen-skills/` directory in your repository:
+Create:
 
 ```
 mutagen-skills/
-├── restassured-test.md       # how to write RestAssured tests
-└── mutation-gap-analysis.md  # how to analyse surviving mutants
+├── restassured-test.md
+└── mutation-gap-analysis.md
 ```
 
-Then point Mutagen to it:
+Run with custom skills:
 
 ```bash
 MUTAGEN_SKILLS_PATH=./mutagen-skills java -jar mutagen.jar .
 ```
 
-Or in GitLab CI:
-
-```yaml
-variables:
-  MUTAGEN_SKILLS_PATH: "$CI_PROJECT_DIR/mutagen-skills"
-```
-
-Skill files are plain markdown. They become the system prompt for every generation request. See the [built-in skills](src/main/resources/skills/) for reference.
+Skill files are plain markdown and become the **system prompt**.
 
 ---
 
-## API key security
+# API key security
 
-**Always** use environment variables or CI/CD secrets. Never hardcode keys.
+Always use **environment variables or CI/CD secrets**.
+
+Correct:
 
 ```bash
-# correct
 export ANTHROPIC_API_KEY=sk-ant-...
 java -jar mutagen.jar .
-
-# never do this
-java -jar mutagen.jar --api-key sk-ant-...   # visible in process list
 ```
 
-In GitLab, set `ANTHROPIC_API_KEY` as a **masked** and **protected** variable under `Settings → CI/CD → Variables`. Mutagen reads it automatically — no further configuration needed.
+Never expose keys in command arguments.
 
 ---
 
-## Building from source
+# Building from source
 
-Requirements: Java 21, Maven 3.9+
+Requirements:
+
+- Java 21
+- Maven 3.9+
 
 ```bash
 git clone https://github.com/arjanassink1978/mutagen.git
 cd mutagen
+
 mvn package -q
+
 java -jar target/mutagen.jar /path/to/repo mutate
 ```
 
 ---
 
-## Project structure
+# Project structure
 
 ```
 src/main/java/dev/mutagen/
-├── parser/        # AST-based Spring Boot controller scanner
-├── generator/     # LLM-driven RestAssured test generator
-├── skill/         # Skill loader with user-override support
-├── llm/
-│   ├── client/    # LlmClient interface, factory, exception
-│   ├── model/     # LlmRequest, LlmResponse
-│   └── provider/  # Anthropic, OpenAI, Proxy implementations
-├── mutation/      # Pitest runner, report parser, mutation loop
-├── git/           # GitLab MR and GitHub PR integration
-└── model/         # EndpointInfo, ParseResult, ParamInfo, ...
 
+parser/        AST-based Spring Boot controller scanner
+generator/     LLM-driven RestAssured test generator
+skill/         skill loader
+
+llm/
+ ├ client/
+ ├ model/
+ └ provider/
+
+mutation/      Pitest runner and mutation loop
+git/           GitHub PR and GitLab MR integration
+model/         Endpoint models
+```
+
+Built-in skills:
+
+```
 src/main/resources/skills/
 ├── restassured-test.md
 └── mutation-gap-analysis.md
@@ -171,30 +287,42 @@ src/main/resources/skills/
 
 ---
 
-## Roadmap
+# Limitations
 
-- [x] Endpoint parser (AST-based, Spring Boot)
-- [x] Multi-provider LLM client (Anthropic, OpenAI)
-- [x] Skill system with user overrides
+Currently optimized for:
+
+- Spring Boot REST APIs
+- Maven projects
+- RestAssured integration tests
+
+---
+
+# Roadmap
+
+- [x] AST-based endpoint parser
+- [x] Multi-provider LLM client
+- [x] Skill system
 - [x] RestAssured test generator
-- [x] Pitest mutation loop (subprocess, XML report parsing, LLM gap-fill)
-- [x] Auth probing — auto-discovers signup/signin flow from running backend
-- [x] `@SpringBootTest` embedded server support (no external backend needed)
-- [x] AbstractIT base class generation with JWT auth setup
-- [x] GitLab MR integration
+- [x] Pitest mutation feedback loop
+- [x] Auth probing
+- [x] Embedded `@SpringBootTest` support
 - [x] GitHub PR integration
+- [x] GitLab MR integration
 - [ ] GitLab CI/CD Catalog component
-- [ ] Incremental runs (manifest-based, skip unchanged endpoints)
-- [ ] Free vs paid plan (endpoint limit + Gumroad license)
+- [ ] Incremental runs
+- [ ] GitHub Action
+- [ ] Free vs paid plan
 
 ---
 
-## Easter egg
+# Easter egg
 
-In the TMNT universe, the substance that mutates the turtles into heroes is called **Mutagen**. This tool mutates your test suite — and kills the mutants. The circle is complete.
+In the TMNT universe, the substance that mutates the turtles into heroes is called **Mutagen**.
+
+This tool mutates your test suite — and **kills the mutants**.
 
 ---
 
-## License
+# License
 
 MIT
