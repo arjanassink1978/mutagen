@@ -29,14 +29,23 @@ labels: bug
 - Maven version (`mvn -version`):
 - LLM provider: Anthropic / OpenAI
 - Target project: Spring Boot version, single module / multi-module
+- OS / Platform (Windows/macOS/Linux):
+
+## Severity
+
+<!-- Low / Medium / High / Blocking -->
+
+## Steps tried / Workarounds
+
+1.
+2.
+
+## Screenshots / GIFs
+
+<!-- Optional: add screenshots or GIFs to help explain your problem -->
 
 ## Logs
 
 <details>
 <summary>Mutagen output</summary>
 
-```
-paste output here
-```
-
-</details>
