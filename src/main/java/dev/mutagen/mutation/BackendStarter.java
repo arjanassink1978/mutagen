@@ -69,20 +69,38 @@ public class BackendStarter implements AutoCloseable {
                 .redirectErrorStream(true)
                 .start();
 
-        // Drain stdout/stderr in background so the process doesn't block
+        // Drain stdout/stderr in background; keep last 50 lines for diagnostics
+        java.util.Deque<String> recentLines = new java.util.ArrayDeque<>();
         Thread drainer = new Thread(() -> {
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(process.getInputStream()))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     log.debug("[backend] {}", line);
+                    synchronized (recentLines) {
+                        recentLines.addLast(line);
+                        if (recentLines.size() > 50) recentLines.removeFirst();
+                    }
                 }
             } catch (IOException ignored) {}
         }, "backend-stdout-drainer");
         drainer.setDaemon(true);
         drainer.start();
 
-        waitForPort(port, STARTUP_TIMEOUT_SECONDS);
+        try {
+            waitForPort(port, STARTUP_TIMEOUT_SECONDS);
+        } catch (IOException e) {
+            String tail;
+            synchronized (recentLines) {
+                tail = String.join("\n", recentLines);
+            }
+            if (!tail.isBlank()) {
+                log.error("Backend last output:\n{}", tail);
+            } else {
+                log.error("Backend produced no output — check that 'mvn' is on PATH and the project compiles");
+            }
+            throw e;
+        }
         log.info("Backend is ready on port {}", port);
         return port;
     }
@@ -115,15 +133,15 @@ public class BackendStarter implements AutoCloseable {
     private static List<String> buildStartCommand(Path projectDir) {
         // Maven wrapper preferred, fall back to system mvn
         if (projectDir.resolve("mvnw").toFile().exists()) {
-            return List.of("./mvnw", "spring-boot:run", "-q");
+            return List.of("./mvnw", "spring-boot:run", "-q", "-Dmaven.test.skip=true");
         }
         if (projectDir.resolve("pom.xml").toFile().exists()) {
-            return List.of("mvn", "spring-boot:run", "-q");
+            return List.of("mvn", "spring-boot:run", "-q", "-Dmaven.test.skip=true");
         }
         if (projectDir.resolve("gradlew").toFile().exists()) {
-            return List.of("./gradlew", "bootRun", "-q");
+            return List.of("./gradlew", "bootRun", "-q", "-x", "test");
         }
-        return List.of("mvn", "spring-boot:run", "-q");
+        return List.of("mvn", "spring-boot:run", "-q", "-Dmaven.test.skip=true");
     }
 
     private static int readPort(Path repoPath) {

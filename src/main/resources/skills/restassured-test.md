@@ -64,20 +64,24 @@ The tests run against a live backend. If **any** endpoint in the controller is m
        RestAssured.baseURI = "http://localhost";
        RestAssured.port    = __BACKEND_PORT__;
 
-       // Register test user — omit roles to let the backend assign the default role
-       // Ignore the response code: 200/201 = created, 400 = already exists (both are fine)
+       // Use a unique username per run so tests are idempotent against any database (in-memory or persistent)
+       String uniqueUser = "testuser_" + java.util.UUID.randomUUID().toString().substring(0, 8);
+       String uniqueEmail = uniqueUser + "@example.com";
+
+       // Register test user — always succeeds because the username is unique
        given().contentType(ContentType.JSON)
-              .body("{\"username\":\"testuser\",\"email\":\"testuser@example.com\",\"password\":\"Test1234!\"}")
+              .body("{\"username\":\"" + uniqueUser + "\",\"email\":\"" + uniqueEmail + "\",\"password\":\"Test1234!\"}")
               .post("/api/auth/signup");
 
        // Sign in and capture token — use the field name from the response (commonly "token" or "accessToken")
        token = given().contentType(ContentType.JSON)
-                      .body("{\"username\":\"testuser\",\"password\":\"Test1234!\"}")
+                      .body("{\"username\":\"" + uniqueUser + "\",\"password\":\"Test1234!\"}")
                       .post("/api/auth/signin")
                       .then().statusCode(200)
                       .extract().path("token");
    }
    ```
+   When using DTO classes instead of raw JSON strings, declare `uniqueUser` and `uniqueEmail` as `static` fields and set them before `@BeforeAll` runs, then use setter methods on the DTO.
 3. For every request to an authenticated endpoint, add `.header("Authorization", "Bearer " + token)`.
 4. If no auth endpoints are present in the list, derive reasonable signup/signin paths from the controller's base path.
 5. Test ALL endpoints fully — do NOT skip authenticated endpoints.
