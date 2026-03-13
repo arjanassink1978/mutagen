@@ -1,0 +1,12 @@
+services:
+  mutagen:
+    build: .
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - TESTGEN_API_KEY=${TESTGEN_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MUTATION_THRESHOLD=${MUTATION_THRESHOLD:-80}
+    volumes:
+      - ${PROJECT_PATH:-.}:/workspace
+    working_dir: /workspace
+    command: ["/workspace/restbackend", "mutate"]

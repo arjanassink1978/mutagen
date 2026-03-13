@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mutations>
+
+    <!-- KILLED: a test caught this mutant -->
+    <mutation detected='true' status='KILLED' numberOfTestsRun='3'>
+        <sourceFile>UserController.java</sourceFile>
+        <mutatedClass>com.example.controller.UserController</mutatedClass>
+        <mutatedMethod>createUser</mutatedMethod>
+        <mutatedMethodDesc>(Lcom/example/dto/CreateUserRequest;)Lorg/springframework/http/ResponseEntity;</mutatedMethodDesc>
+        <lineNumber>24</lineNumber>
+        <mutator>org.pitest.mutationtest.engine.gregor.mutators.NegateConditionalsMutator</mutator>
+        <indexes><index>0</index></indexes>
+        <blocks><block>0</block></blocks>
+        <killingTest>com.example.controller.UserControllerIT/createUser_validRequest_returns201()</killingTest>
+        <description>negated conditional</description>
+    </mutation>
+
+    <!-- SURVIVED: no test caught this mutant -->
+    <mutation detected='false' status='SURVIVED' numberOfTestsRun='3'>
+        <sourceFile>UserController.java</sourceFile>
+        <mutatedClass>com.example.controller.UserController</mutatedClass>
+        <mutatedMethod>getUserById</mutatedMethod>
+        <mutatedMethodDesc>(J)Lorg/springframework/http/ResponseEntity;</mutatedMethodDesc>
+        <lineNumber>38</lineNumber>
+        <mutator>org.pitest.mutationtest.engine.gregor.mutators.ConditionalsBoundaryMutator</mutator>
+        <indexes><index>0</index></indexes>
+        <blocks><block>0</block></blocks>
+        <killingTest/>
+        <description>changed conditional boundary</description>
+    </mutation>
+
+    <!-- SURVIVED: another gap -->
+    <mutation detected='false' status='SURVIVED' numberOfTestsRun='3'>
+        <sourceFile>UserController.java</sourceFile>
+        <mutatedClass>com.example.controller.UserController</mutatedClass>
+        <mutatedMethod>deleteUser</mutatedMethod>
+        <mutatedMethodDesc>(J)Lorg/springframework/http/ResponseEntity;</mutatedMethodDesc>
+        <lineNumber>55</lineNumber>
+        <mutator>org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator</mutator>
+        <indexes><index>0</index></indexes>
+        <blocks><block>0</block></blocks>
+        <killingTest/>
+        <description>removed call to void method</description>
+    </mutation>
+
+    <!-- NO_COVERAGE: code was never executed by any test -->
+    <mutation detected='false' status='NO_COVERAGE' numberOfTestsRun='0'>
+        <sourceFile>UserController.java</sourceFile>
+        <mutatedClass>com.example.controller.UserController</mutatedClass>
+        <mutatedMethod>updateUser</mutatedMethod>
+        <mutatedMethodDesc>(JLcom/example/dto/UpdateUserRequest;)Lorg/springframework/http/ResponseEntity;</mutatedMethodDesc>
+        <lineNumber>70</lineNumber>
+        <mutator>org.pitest.mutationtest.engine.gregor.mutators.ReturnValsMutator</mutator>
+        <indexes><index>0</index></indexes>
+        <blocks><block>0</block></blocks>
+        <killingTest/>
+        <description>replaced return value with null</description>
+    </mutation>
+
+</mutations>

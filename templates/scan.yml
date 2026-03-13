@@ -1,0 +1,32 @@
+spec:
+  inputs:
+    mutation_threshold:
+      type: number
+      default: 80
+      description: "Minimum mutation score percentage (0-100)"
+    source_path:
+      type: string
+      default: "."
+      description: "Path to the Spring Boot project root"
+    test_output_path:
+      type: string
+      default: "."
+      description: "Path where generated tests are written"
+    image:
+      type: string
+      default: "registry.gitlab.com/mutagen/mutagen:latest"
+      description: "Mutagen Docker image to use"
+---
+mutagen-scan:
+  image: $[[ inputs.image ]]
+  variables:
+    MUTATION_THRESHOLD: $[[ inputs.mutation_threshold ]]
+  script:
+    - java -jar /opt/mutagen/mutagen.jar generate $[[ inputs.source_path ]]
+  artifacts:
+    paths:
+      - $[[ inputs.test_output_path ]]/src/test/
+    when: always
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

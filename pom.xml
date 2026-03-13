@@ -1,0 +1,308 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>dev.mutagen</groupId>
+    <artifactId>mutagen</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <name>Mutagen</name>
+    <description>
+        AI-powered API test generator for Spring Boot.
+        Scans your repo, generates RestAssured tests, runs mutation testing,
+        and opens a GitLab MR or GitHub PR — all in one CI pipeline step.
+    </description>
+    <url>https://mutagen.dev</url>
+
+    <properties>
+        <java.version>21</java.version>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- Parser -->
+        <javaparser.version>3.26.3</javaparser.version>
+
+        <!-- JSON -->
+        <jackson.version>2.17.2</jackson.version>
+
+        <!-- CLI -->
+        <picocli.version>4.7.6</picocli.version>
+
+        <!-- Logging -->
+        <slf4j.version>2.0.13</slf4j.version>
+        <logback.version>1.5.7</logback.version>
+
+        <!-- Git platform integraties (Module 4) -->
+        <gitlab4j.version>6.0.0</gitlab4j.version>
+        <github-api.version>1.323</github-api.version>
+
+        <!-- Test -->
+        <junit.version>5.11.0</junit.version>
+        <assertj.version>3.26.3</assertj.version>
+        <mockito.version>5.12.0</mockito.version>
+        <wiremock.version>3.9.1</wiremock.version>
+    </properties>
+
+    <dependencies>
+
+        <!-- ================================================================ -->
+        <!-- MODULE 1 — PARSER                                                -->
+        <!-- AST-based Java source code parsing, no regex -->
+        <!-- ================================================================ -->
+
+        <dependency>
+            <groupId>com.github.javaparser</groupId>
+            <artifactId>javaparser-symbol-solver-core</artifactId>
+            <version>${javaparser.version}</version>
+        </dependency>
+
+        <!-- ================================================================ -->
+        <!-- MODULE 2 — LLM CLIENT & SKILL LOADER                            -->
+        
+        
+        <!-- ================================================================ -->
+
+        <!-- Core JSON -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- Optional / JDK8 types in JSON (e.g. in ParseResult) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jdk8</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- Java time types (Instant etc.) in JSON -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- ================================================================ -->
+        <!-- MODULE 3 — MUTATION TESTING (PITEST)                            -->
+        <!-- Mutagen invokes Pitest as a subprocess via ProcessBuilder -->
+        
+        <!-- parses target/pit-reports/mutations.xml -->
+        <!-- ================================================================ -->
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-xml</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- ================================================================ -->
+        <!-- MODULE 4 — GIT PLATFORM INTEGRATIES                             -->
+        <!-- ================================================================ -->
+
+        <!-- GitLab API — create MR, branches, file commits -->
+        <dependency>
+            <groupId>org.gitlab4j</groupId>
+            <artifactId>gitlab4j-api</artifactId>
+            <version>${gitlab4j.version}</version>
+        </dependency>
+
+        <!-- GitHub API — create PRs (for future GitHub Action support) -->
+        <dependency>
+            <groupId>org.kohsuke</groupId>
+            <artifactId>github-api</artifactId>
+            <version>${github-api.version}</version>
+        </dependency>
+
+        <!-- ================================================================ -->
+        <!-- CLI                                                              -->
+        <!-- ================================================================ -->
+
+        <dependency>
+            <groupId>info.picocli</groupId>
+            <artifactId>picocli</artifactId>
+            <version>${picocli.version}</version>
+        </dependency>
+
+        <!-- ================================================================ -->
+        <!-- LOGGING                                                          -->
+        <!-- ================================================================ -->
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>${logback.version}</version>
+        </dependency>
+
+        <!-- ================================================================ -->
+        <!-- TEST                                                             -->
+        <!-- ================================================================ -->
+
+        <!-- JUnit 5 -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- AssertJ — leesbare assertions -->
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <version>${assertj.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Mockito — for GitLab/GitHub client mocks in Module 4 tests -->
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>${mockito.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-junit-jupiter</artifactId>
+            <version>${mockito.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            WireMock — HTTP stub server voor testen van AnthropicLlmClient
+            en OpenAiLlmClient zonder echte API calls te maken
+        -->
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock-jetty12</artifactId>
+            <version>${wiremock.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+    </dependencies>
+
+    <build>
+        <plugins>
+
+            <!-- ============================================================ -->
+            <!-- COMPILER                                                      -->
+            <!-- ============================================================ -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <source>21</source>
+                    <target>21</target>
+                    <!--
+                        Picocli annotation processor:
+                        genereert @Command metadata en reflection-config.json
+                        voor een eventuele toekomstige GraalVM native image
+                    -->
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>info.picocli</groupId>
+                            <artifactId>picocli-codegen</artifactId>
+                            <version>${picocli.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                    <compilerArgs>
+                        <arg>-Aproject=${project.groupId}/${project.artifactId}</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+
+            <!-- ============================================================ -->
+            <!-- TEST                                                          -->
+            <!-- ============================================================ -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.3.1</version>
+                <configuration>
+                    <argLine>
+                        --add-opens java.base/java.lang=ALL-UNNAMED
+                        --add-opens java.base/java.util=ALL-UNNAMED
+                        -Dnet.bytebuddy.experimental=true
+                    </argLine>
+                </configuration>
+            </plugin>
+
+            <!-- ============================================================ -->
+            <!-- FAT JAR                                                       -->
+            <!-- Bouwt target/mutagen.jar — wordt opgepakt door Dockerfile    -->
+            <!-- Gebruik: java -jar mutagen.jar /pad/naar/repo                -->
+            <!-- ============================================================ -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <finalName>mutagen</finalName>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>dev.mutagen.Main</mainClass>
+                                </transformer>
+                                <!-- Merge META-INF/services files (Jackson modules etc.) -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                                <!-- Merge NOTICE files -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ApacheNoticeResourceTransformer"/>
+                            </transformers>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <!-- Remove signature files — JAR breaks if these remain -->
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                        <exclude>META-INF/LICENSE*</exclude>
+                                        <exclude>META-INF/NOTICE*</exclude>
+                                        <!-- Remove unnecessary files to reduce JAR size -->
+                                        <exclude>META-INF/maven/**</exclude>
+                                        <exclude>**/*.proto</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+        </plugins>
+
+        <resources>
+            <!-- Standard resources (skills/*.md, logback.xml) without filtering -->
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+            </resource>
+            <!--
+                Gefilterde resources voor versie-injectie:
+                Maak src/main/resources-filtered/build.properties met:
+                mutagen.version=${project.version}
+                mutagen.build=${maven.build.timestamp}
+            -->
+            <resource>
+                <directory>src/main/resources-filtered</directory>
+                <filtering>true</filtering>
+            </resource>
+        </resources>
+
+    </build>
+
+</project>
