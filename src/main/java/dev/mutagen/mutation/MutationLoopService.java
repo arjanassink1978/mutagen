@@ -1,6 +1,5 @@
 package dev.mutagen.mutation;
 
-import dev.mutagen.auth.AuthAnalyzer;
 import dev.mutagen.auth.AuthContext;
 import dev.mutagen.generator.GeneratedTest;
 import dev.mutagen.generator.PromptBuilder;
@@ -103,6 +102,17 @@ public class MutationLoopService {
                                    Path repoPath,
                                    int threshold,
                                    int maxIterations) throws IOException {
+        return run(parseResult, generatorService, existingTestCode, repoPath,
+                threshold, maxIterations, AuthContext.noAuth());
+    }
+
+    public MutationLoopResult run(ParseResult parseResult,
+                                   TestGeneratorService generatorService,
+                                   String existingTestCode,
+                                   Path repoPath,
+                                   int threshold,
+                                   int maxIterations,
+                                   AuthContext authContext) throws IOException {
 
         MutationReport        report      = null;
         double                initialScore = -1;
@@ -115,9 +125,6 @@ public class MutationLoopService {
         try {
             port = backend.start();
             log.info("Backend started on port {}", port);
-
-            // Analyse the project's security config statically (no HTTP calls needed)
-            AuthContext authContext = new AuthAnalyzer().analyze(repoPath);
 
             current = generatorService.generateAll(parseResult, existingTestCode, authContext);
             lastKnownTests = current;

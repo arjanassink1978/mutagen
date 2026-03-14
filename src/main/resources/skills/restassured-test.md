@@ -150,8 +150,8 @@ The tests run against a live backend. If **any** endpoint in the controller is m
 3. Invalid fields — expect 400 (if `@Valid` is present, test a clear constraint violation)
 
 **DELETE endpoints:**
-1. Not found — expect 404 (use a non-existent ID, do NOT test happy-path delete as it requires prior state)
-   Add `.header("Authorization", "Bearer " + token)` if the endpoint requires authentication.
+1. Happy path (if the endpoint has an ID path param) — first create the resource with a POST, extract the ID, then delete it. See "Multi-step tests" below.
+2. Not found — expect 404 using a non-existent ID like 999999.
 
 ### Assertions
 - Always validate the HTTP status code
@@ -166,6 +166,42 @@ Examples:
 - `createUser_invalidEmail_returns400()`
 - `createUser_emptyBody_returns400()`
 
+### Multi-step tests for endpoints that need existing data
+
+Some endpoints operate on an existing resource (endpoints with `/{id}` in the path: like, unlike, reply, delete-by-id, get-by-id, update-by-id).
+For these, **create the resource first** within the same test method:
+
+```java
+@Test
+void likeMessage_existingMessage_returns200() {
+    // Step 1: create parent resource using UUID-based unique data
+    String unique = java.util.UUID.randomUUID().toString().substring(0, 8);
+    int resourceId = given()
+            .header("Authorization", "Bearer " + token)
+            .param("content", "content_" + unique)   // .param() for query params, .body(json) for request body
+        .when()
+            .post("/api/messages")
+        .then()
+            .statusCode(anyOf(is(200), is(201)))
+            .extract().path("id");
+
+    // Step 2: call the target endpoint with the real ID
+    given()
+            .header("Authorization", "Bearer " + token)
+        .when()
+            .post("/api/messages/" + resourceId + "/like")
+        .then()
+            .statusCode(anyOf(is(200), is(201)));
+}
+```
+
+**Always use UUID-based unique values** in setup steps for fields that must be unique (username, email, content, name, etc.) — never hardcode values that will conflict on repeated runs:
+```java
+String unique = java.util.UUID.randomUUID().toString().substring(0, 8);
+String username = "user_" + unique;
+String email    = "user_" + unique + "@example.com";
+```
+
 ### What you must NOT do
 - No Mockito, no @MockBean, no Spring context
 - No hardcoded ports
@@ -173,9 +209,8 @@ Examples:
 - No `Thread.sleep()`
 - No empty test bodies
 - No System.out.println
-- Do NOT test happy-path GET-by-ID when you cannot guarantee the resource exists
-- Do NOT test happy-path DELETE — it requires prior state that may not exist
-- Do NOT test happy-path nested POST/PUT/PATCH on a parent resource (e.g. `/messages/{id}/reply`, `/messages/{id}/like`) when you cannot guarantee the parent exists. Instead test the not-found case with a non-existent ID like 999999 and expect `anyOf(is(404), is(400))`
+- Do NOT test happy-path GET-by-ID without first creating the resource (use multi-step pattern above)
+- Do NOT hardcode usernames/emails/slugs — always use UUID-based unique values
 
 ## Quality check
 Before returning code, verify internally:

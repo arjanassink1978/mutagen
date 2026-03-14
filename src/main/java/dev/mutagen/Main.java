@@ -1,5 +1,8 @@
 package dev.mutagen;
 
+import dev.mutagen.auth.AuthConfig;
+import dev.mutagen.auth.AuthConfigReader;
+import dev.mutagen.auth.AuthContext;
 import dev.mutagen.generator.GeneratedTest;
 import dev.mutagen.generator.TestGeneratorService;
 import dev.mutagen.llm.client.LlmClient;
@@ -35,11 +38,14 @@ public class Main implements Callable<Integer> {
 
     private static final Logger log = LoggerFactory.getLogger(Main.class);
 
-    @Parameters(index = "0", description = "Path to the repository to scan")
+    @Option(names = {"-r", "--repo"}, required = true, description = "Path to the repository to scan")
     private Path repoPath;
 
     @Option(names = {"-o", "--output"}, description = "Output path for endpoints.json")
     private Path outputPath;
+
+    @Option(names = {"--auth"}, description = "Path to authorization.md describing auth credentials")
+    private Path authConfigPath;
 
     @Command(name = "parse", description = "Run only the endpoint parser")
     public Integer parse() throws IOException {
@@ -78,14 +84,14 @@ public class Main implements Callable<Integer> {
         int threshold = Integer.parseInt(System.getenv().getOrDefault("MUTATION_THRESHOLD", "80"));
         int maxIterations = Integer.parseInt(System.getenv().getOrDefault("MUTATION_MAX_ITERATIONS", "3"));
 
-        // Backend is started inside the loop service so that AuthProber can probe auth
-        // BEFORE test generation — this guarantees the LLM gets verified payloads.
+        AuthContext authContext = loadAuthContext();
+
         PitestRunner runner = PitestRunner.detect(repoPath);
         MutationLoopService loopService = new MutationLoopService(llmClient, skillLoader, runner);
 
         MutationLoopResult loopResult = null;
         try {
-            loopResult = loopService.run(result, service, null, repoPath, threshold, maxIterations);
+            loopResult = loopService.run(result, service, null, repoPath, threshold, maxIterations, authContext);
         } finally {
             // Always clean up the target repo — even if the run threw an exception.
             // loopService.getLastKnownTests() returns whatever was last written, so we
@@ -119,6 +125,18 @@ public class Main implements Callable<Integer> {
         new MavenModuleWriter().write(outputDir, loopResult.tests(), loopResult.backendPort());
 
         return loopResult.thresholdMet(threshold) ? 0 : 1;
+    }
+
+    /**
+     * Loads the AuthContext from the optional {@code --auth} file, or returns no-auth if omitted.
+     */
+    private AuthContext loadAuthContext() throws IOException {
+        if (authConfigPath == null) {
+            log.info("No --auth file provided — assuming no authentication required");
+            return AuthContext.noAuth();
+        }
+        AuthConfig config = new AuthConfigReader().read(authConfigPath);
+        return AuthContext.fromConfig(config);
     }
 
     /**
