@@ -352,9 +352,18 @@ public class MutationLoopService {
             return withoutBroken;
         }
 
+        // No fallback available (initial generation, not gap-fill).
+        // Strip the specific @Test methods that are still failing rather than aborting the run.
+        List<GeneratedTest> stripped = stripFailingTestMethods(current, remaining);
+        writeTestFiles(stripped, repoPath, 0);
+        Map<String, String> afterStrip = runTestsAndCollectFailures(stripped, repoPath);
+        if (afterStrip.isEmpty()) {
+            log.warn("  Stripped unfixable @Test methods from: {}", remaining.keySet());
+            return stripped;
+        }
         throw new IOException(
                 "Tests still failing after " + MAX_FIX_ATTEMPTS + " fix attempts — aborting. " +
-                "Failing classes: " + String.join(", ", remaining.keySet()));
+                "Failing classes: " + String.join(", ", afterStrip.keySet()));
     }
 
     /**
@@ -544,6 +553,77 @@ public class MutationLoopService {
                 return test;
             }
         }).toList();
+    }
+
+    /**
+     * For each still-failing test class, extract the names of the failing test methods from
+     * the failure summary and strip only those methods from the source code.
+     * Other test methods in the same class are preserved.
+     */
+    private List<GeneratedTest> stripFailingTestMethods(List<GeneratedTest> tests,
+                                                         Map<String, String> failures) {
+        return tests.stream().map(test -> {
+            String failureSummary = failures.get(test.getTestClassName());
+            if (failureSummary == null) return test;
+
+            // Extract method names from surefire failure lines like "FAIL: methodName"
+            java.util.Set<String> failingMethods = new java.util.HashSet<>();
+            for (String line : failureSummary.split("\n")) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("FAIL:")) {
+                    failingMethods.add(trimmed.substring(5).trim());
+                }
+            }
+            if (failingMethods.isEmpty()) return test;
+
+            String stripped = stripNamedTestMethods(test.getSourceCode(), failingMethods);
+            if (!stripped.equals(test.getSourceCode())) {
+                log.warn("  Stripped {} unfixable @Test method(s) from {}: {}",
+                        failingMethods.size(), test.getTestClassName(), failingMethods);
+                return test.withSourceCode(stripped);
+            }
+            return test;
+        }).toList();
+    }
+
+    /**
+     * Removes specific @Test methods by name from Java source code.
+     */
+    private String stripNamedTestMethods(String code, java.util.Set<String> methodNames) {
+        String[] lines = code.split("\n", -1);
+        java.util.List<String> result = new java.util.ArrayList<>();
+        int i = 0;
+        while (i < lines.length) {
+            String trimmed = lines[i].trim();
+            if (trimmed.equals("@Test") || trimmed.startsWith("@Test(")) {
+                // Peek ahead to find the method name
+                int j = i + 1;
+                while (j < lines.length && !lines[j].contains("{")) j++;
+                String methodLine = (j < lines.length) ? lines[j] : "";
+                boolean isFailingMethod = methodNames.stream()
+                        .anyMatch(name -> methodLine.contains(name + "(") || methodLine.contains(name + " ("));
+
+                if (isFailingMethod) {
+                    // Skip the annotation and the method body
+                    int start = i;
+                    while (i < lines.length && !lines[i].contains("{")) i++;
+                    int depth = 0;
+                    while (i < lines.length) {
+                        for (char c : lines[i].toCharArray()) {
+                            if (c == '{') depth++;
+                            else if (c == '}') depth--;
+                        }
+                        i++;
+                        if (depth == 0) break;
+                    }
+                    if (i < lines.length && lines[i].trim().isEmpty()) i++;
+                    continue;
+                }
+            }
+            result.add(lines[i]);
+            i++;
+        }
+        return String.join("\n", result);
     }
 
     private String sanitizeOutput(String raw) {
