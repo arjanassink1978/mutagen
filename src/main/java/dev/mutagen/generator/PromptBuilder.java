@@ -67,8 +67,10 @@ public class PromptBuilder {
         }
         sb.append("\n");
 
-        sb.append("## Existing test class (summary)\n");
-        sb.append(buildTestClassSummary(existingTestCode)).append("\n\n");
+        // Include the full existing test source so the LLM can follow the exact API call patterns
+        // (e.g. .multiPart() vs .param() vs .body(json), which tokens are used, etc.)
+        sb.append("## Existing test class (copy the call style from these working tests)\n");
+        sb.append("```java\n").append(truncate(existingTestCode, 3000)).append("\n```\n\n");
 
         sb.append("## Mutants to kill\n");
         sb.append("Each entry is prefixed with its status:\n");
@@ -80,9 +82,9 @@ public class PromptBuilder {
 
         sb.append("## Instruction\n");
         sb.append("Write additional @Test methods that kill the surviving/uncovered mutants above.\n");
-        sb.append("Use the listed API endpoints to reach the mutated code paths.\n");
-        sb.append("For [NO_COVERAGE] mutants in methods that operate on existing resources (like/unlike/reply/delete): ");
-        sb.append("first create the resource with a POST call and extract its ID, then call the target endpoint with that ID.\n");
+        sb.append("Copy the exact RestAssured call style from the existing tests above (.multiPart, .param, .body, etc.).\n");
+        sb.append("For [NO_COVERAGE] mutants in methods that operate on existing resources: ");
+        sb.append("first create the resource with a POST (using the same style as existing setup steps), extract its ID, then call the target endpoint.\n");
         sb.append("Return ONLY the extra test methods, not a full class.\n");
         return sb.toString();
     }
