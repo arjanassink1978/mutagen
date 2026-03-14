@@ -38,17 +38,11 @@ public class Main implements Callable<Integer> {
 
     private static final Logger log = LoggerFactory.getLogger(Main.class);
 
-    @Option(names = {"-r", "--repo"}, required = true, description = "Path to the repository to scan")
-    private Path repoPath;
-
-    @Option(names = {"-o", "--output"}, description = "Output path for endpoints.json")
-    private Path outputPath;
-
-    @Option(names = {"--auth"}, description = "Path to authorization.md describing auth credentials")
-    private Path authConfigPath;
-
     @Command(name = "parse", description = "Run only the endpoint parser")
-    public Integer parse() throws IOException {
+    public Integer parse(
+            @Parameters(index = "0", description = "Path to the repository to scan") Path repoPath,
+            @Option(names = {"-o", "--output"}, description = "Output path for endpoints.json") Path outputPath
+    ) throws IOException {
         RepoScanner scanner = new RepoScanner();
         Path out = outputPath != null ? outputPath : repoPath.resolve("endpoints.json");
         ParseResult result = scanner.scanAndWrite(repoPath, out);
@@ -56,7 +50,10 @@ public class Main implements Callable<Integer> {
     }
 
     @Command(name = "generate", description = "Parse controllers and generate RestAssured tests")
-    public Integer generate() throws IOException {
+    public Integer generate(
+            @Parameters(index = "0", description = "Path to the repository to scan") Path repoPath,
+            @Option(names = {"-o", "--output"}, description = "Output path for endpoints.json") Path outputPath
+    ) throws IOException {
         RepoScanner scanner = new RepoScanner();
         ParseResult result = scanner.scan(repoPath);
 
@@ -73,7 +70,11 @@ public class Main implements Callable<Integer> {
     }
 
     @Command(name = "mutate", description = "Generate tests, run Pitest mutation loop, and fill coverage gaps")
-    public Integer mutate() throws IOException {
+    public Integer mutate(
+            @Parameters(index = "0", paramLabel = "<repoPath>", description = "Path to the repository to scan") Path repoPath,
+            @Option(names = {"-o", "--output"}, paramLabel = "<path>", description = "Output path for generated test module") Path outputPath,
+            @Option(names = {"--auth"}, paramLabel = "<authFile>", description = "Path to authorization.md with auth credentials") Path authConfigPath
+    ) throws IOException {
         RepoScanner scanner = new RepoScanner();
         ParseResult result = scanner.scan(repoPath);
 
@@ -84,7 +85,7 @@ public class Main implements Callable<Integer> {
         int threshold = Integer.parseInt(System.getenv().getOrDefault("MUTATION_THRESHOLD", "80"));
         int maxIterations = Integer.parseInt(System.getenv().getOrDefault("MUTATION_MAX_ITERATIONS", "3"));
 
-        AuthContext authContext = loadAuthContext();
+        AuthContext authContext = loadAuthContext(authConfigPath);
 
         PitestRunner runner = PitestRunner.detect(repoPath);
         MutationLoopService loopService = new MutationLoopService(llmClient, skillLoader, runner);
@@ -94,8 +95,6 @@ public class Main implements Callable<Integer> {
             loopResult = loopService.run(result, service, null, repoPath, threshold, maxIterations, authContext);
         } finally {
             // Always clean up the target repo — even if the run threw an exception.
-            // loopService.getLastKnownTests() returns whatever was last written, so we
-            // can remove those files and restore the pom regardless of success/failure.
             PitestRunner.cleanupInjectedDependencies(repoPath);
             cleanupInjectedTestFiles(repoPath, loopService.getLastKnownTests());
         }
@@ -120,17 +119,13 @@ public class Main implements Callable<Integer> {
             log.warn("Mutation score below threshold — writing best effort tests");
         }
 
-        // Write final tests to separate Maven module
         Path outputDir = outputPath != null ? outputPath : repoPath;
         new MavenModuleWriter().write(outputDir, loopResult.tests(), loopResult.backendPort());
 
         return loopResult.thresholdMet(threshold) ? 0 : 1;
     }
 
-    /**
-     * Loads the AuthContext from the optional {@code --auth} file, or returns no-auth if omitted.
-     */
-    private AuthContext loadAuthContext() throws IOException {
+    private static AuthContext loadAuthContext(Path authConfigPath) throws IOException {
         if (authConfigPath == null) {
             log.info("No --auth file provided — assuming no authentication required");
             return AuthContext.noAuth();
@@ -139,11 +134,7 @@ public class Main implements Callable<Integer> {
         return AuthContext.fromConfig(config);
     }
 
-    /**
-     * Deletes the test files that were written into the target project during the mutation loop.
-     * The final tests live in the {@code rest-assured-tests} Maven module instead.
-     */
-    private void cleanupInjectedTestFiles(Path repoPath, List<GeneratedTest> tests) {
+    private static void cleanupInjectedTestFiles(Path repoPath, List<GeneratedTest> tests) {
         for (GeneratedTest test : tests) {
             Path file = repoPath.resolve(test.getRelativeFilePath());
             try {
@@ -157,7 +148,8 @@ public class Main implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
-        return parse();
+        new CommandLine(this).usage(System.out);
+        return 0;
     }
 
     public static void main(String[] args) {
