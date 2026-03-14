@@ -19,7 +19,6 @@ import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Parameters;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -40,8 +39,8 @@ public class Main implements Callable<Integer> {
 
     @Command(name = "parse", description = "Run only the endpoint parser")
     public Integer parse(
-            @Parameters(index = "0", description = "Path to the repository to scan") Path repoPath,
-            @Option(names = {"-o", "--output"}, description = "Output path for endpoints.json") Path outputPath
+            @Option(names = {"--repo"}, required = true, paramLabel = "<path>", description = "Path to the repository to scan") Path repoPath,
+            @Option(names = {"-o", "--output"}, paramLabel = "<path>", description = "Output path for endpoints.json") Path outputPath
     ) throws IOException {
         RepoScanner scanner = new RepoScanner();
         Path out = outputPath != null ? outputPath : repoPath.resolve("endpoints.json");
@@ -51,8 +50,8 @@ public class Main implements Callable<Integer> {
 
     @Command(name = "generate", description = "Parse controllers and generate RestAssured tests")
     public Integer generate(
-            @Parameters(index = "0", description = "Path to the repository to scan") Path repoPath,
-            @Option(names = {"-o", "--output"}, description = "Output path for endpoints.json") Path outputPath
+            @Option(names = {"--repo"}, required = true, paramLabel = "<path>", description = "Path to the repository to scan") Path repoPath,
+            @Option(names = {"-o", "--output"}, paramLabel = "<path>", description = "Output path for endpoints.json") Path outputPath
     ) throws IOException {
         RepoScanner scanner = new RepoScanner();
         ParseResult result = scanner.scan(repoPath);
@@ -71,7 +70,7 @@ public class Main implements Callable<Integer> {
 
     @Command(name = "mutate", description = "Generate tests, run Pitest mutation loop, and fill coverage gaps")
     public Integer mutate(
-            @Parameters(index = "0", paramLabel = "<repoPath>", description = "Path to the repository to scan") Path repoPath,
+            @Option(names = {"--repo"}, required = true, paramLabel = "<path>", description = "Path to the repository to scan") Path repoPath,
             @Option(names = {"-o", "--output"}, paramLabel = "<path>", description = "Output path for generated test module") Path outputPath,
             @Option(names = {"--auth"}, paramLabel = "<authFile>", description = "Path to authorization.md with auth credentials") Path authConfigPath
     ) throws IOException {
