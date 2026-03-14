@@ -572,7 +572,7 @@ public class MutationLoopService {
             if ("AbstractIT".equals(test.getTestClassName())) return test;
 
             List<Mutant> relevant = survived.stream()
-                    .filter(m -> isRelevant(m, test))
+                    .filter(m -> isRelevant(m, test, tests))
                     .toList();
 
             if (relevant.isEmpty()) {
@@ -645,15 +645,41 @@ public class MutationLoopService {
      * This ensures mutants in {@code com.example.service} are matched to tests in
      * {@code com.example.controller} (both share {@code com.example}).
      */
-    private boolean isRelevant(Mutant mutant, GeneratedTest test) {
+    /**
+     * Returns true if the mutant should be included in the gap-fill prompt for the given test class.
+     *
+     * <p>Strategy:
+     * <ol>
+     *   <li>Prefer class-name match: strip "IT" from the test class name and compare
+     *       case-insensitively to the simple (unqualified) mutant class name.
+     *       "MessageApiIT" → covers "MessageApi" mutants only.</li>
+     *   <li>Fallback to shared root-package match only when no other test class in
+     *       {@code allTests} already claims this mutant via class-name match. This ensures
+     *       mutants in classes without a dedicated IT are not silently dropped.</li>
+     * </ol>
+     */
+    private boolean isRelevant(Mutant mutant, GeneratedTest test, List<GeneratedTest> allTests) {
         if (mutant.getMutatedClass() == null) return false;
+
+        String mutantSimple = mutant.getMutatedClass().contains(".")
+                ? mutant.getMutatedClass().substring(mutant.getMutatedClass().lastIndexOf('.') + 1)
+                : mutant.getMutatedClass();
+
+        // Primary: class-name match
+        String testSimple = test.getTestClassName().replaceAll("IT$", "");
+        if (testSimple.equalsIgnoreCase(mutantSimple)) return true;
+
+        // Fallback: package match — but only when no other test class claims this mutant
+        boolean anyClassNameMatch = allTests.stream()
+                .filter(t -> !"AbstractIT".equals(t.getTestClassName()))
+                .anyMatch(t -> t.getTestClassName().replaceAll("IT$", "")
+                        .equalsIgnoreCase(mutantSimple));
+        if (anyClassNameMatch) return false; // another IT owns this mutant
+
         String mutantPkg = mutant.getMutatedClass().contains(".")
                 ? mutant.getMutatedClass().substring(0, mutant.getMutatedClass().lastIndexOf('.'))
                 : mutant.getMutatedClass();
         String testPkg = test.getPackageName();
-        // Exact prefix match (original behaviour)
-        if (mutantPkg.startsWith(testPkg) || testPkg.startsWith(mutantPkg)) return true;
-        // Shared root: compare up to min(2, depth) package segments
         String mutantRoot = rootPackage(mutantPkg, 3);
         String testRoot   = rootPackage(testPkg, 3);
         return !mutantRoot.isEmpty() && mutantRoot.equals(testRoot);
