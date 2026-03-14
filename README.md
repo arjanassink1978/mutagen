@@ -149,15 +149,46 @@ export OPENAI_API_KEY=sk-...
 Then run Mutagen:
 
 ```bash
-java -jar mutagen.jar /path/to/repo mutate
+java -jar mutagen.jar mutate --repo /path/to/repo
+```
+
+If your API uses authentication, provide an `authorization.md` file with credentials:
+
+```bash
+java -jar mutagen.jar mutate --repo /path/to/repo --auth /path/to/authorization.md
 ```
 
 Other commands:
 
 ```bash
-java -jar mutagen.jar /path/to/repo generate
-java -jar mutagen.jar /path/to/repo parse
+java -jar mutagen.jar generate --repo /path/to/repo
+java -jar mutagen.jar parse    --repo /path/to/repo
 ```
+
+## Authentication
+
+If your API requires authentication, create an `authorization.md` file describing your credentials:
+
+```markdown
+# Authorization
+
+## Auth endpoints
+- POST /api/auth/signup — register new user (body: name, username, email, password) → 201
+- POST /api/auth/signin — sign in (body: username, password) → 200 {token}
+
+## Pre-seeded users
+- Regular user: username=user, password=user1234, roles=[ROLE_USER]
+- Admin user:   username=admin, password=admin1234, roles=[ROLE_ADMIN]
+```
+
+Pass it with `--auth`:
+
+```bash
+java -jar mutagen.jar mutate --repo /path/to/repo --auth authorization.md
+```
+
+Mutagen uses the pre-seeded users to obtain tokens in `AbstractIT` — no dynamic signup required.
+Without `--auth`, Mutagen assumes no authentication is needed.
 
 ---
 
@@ -276,7 +307,7 @@ cd mutagen
 
 mvn package -q
 
-java -jar target/mutagen.jar /path/to/repo mutate
+java -jar target/mutagen.jar mutate --repo /path/to/repo
 ```
 
 ---
@@ -327,7 +358,7 @@ Currently optimized for:
 - [x] Skill system
 - [x] RestAssured test generator
 - [x] Pitest mutation feedback loop
-- [x] Auth probing
+- [x] Auth config via `--auth authorization.md`
 - [x] Embedded `@SpringBootTest` support
 - [x] GitHub PR integration
 - [x] GitLab MR integration
