@@ -61,7 +61,7 @@ public class PromptBuilder {
 
         sb.append("## Available API endpoints (use these to write tests)\n");
         if (endpoints != null && !endpoints.isEmpty()) {
-            endpoints.forEach(e -> sb.append(formatEndpointCompact(e)).append("\n"));
+            endpoints.forEach(e -> sb.append(formatEndpoint(e)).append("\n"));
         } else {
             sb.append("(see existing test class for examples)\n");
         }
@@ -90,7 +90,12 @@ public class PromptBuilder {
     private String formatEndpointCompact(EndpointInfo e) {
         StringBuilder sb = new StringBuilder();
         sb.append("- **").append(e.getHttpMethod()).append(" ").append(e.getFullPath()).append("**");
-        if (e.isRequiresAuth()) sb.append(" (auth required)");
+        if (e.isRequiresAuth()) {
+            String role = e.getRequiredRole();
+            if (isAdminOnly(role)) sb.append(" (").append(role).append(" only — use adminToken)");
+            else if (role != null) sb.append(" (role: ").append(role).append(" — use token)");
+            else sb.append(" (auth — use token)");
+        }
         if (e.getRequestBody() != null) {
             sb.append(" body: ").append(e.getRequestBody().getJavaType());
             if (!e.getRequestBody().getFields().isEmpty()) {
@@ -109,6 +114,11 @@ public class PromptBuilder {
         if (!e.getQueryParams().isEmpty()) {
             sb.append(" query:{").append(e.getQueryParams().stream()
                     .map(p -> p.getName() + ":" + p.getJavaType()).collect(java.util.stream.Collectors.joining(",")))
+                    .append("}");
+        }
+        if (!e.getResponseFields().isEmpty()) {
+            sb.append(" response:{").append(e.getResponseFields().entrySet().stream()
+                    .map(en -> en.getKey() + ":" + en.getValue()).collect(java.util.stream.Collectors.joining(",")))
                     .append("}");
         }
         return sb.toString();
@@ -186,13 +196,35 @@ public class PromptBuilder {
         StringBuilder sb = new StringBuilder();
         sb.append("### ").append(e.getHttpMethod()).append(" ").append(e.getFullPath()).append("\n");
         sb.append("Method: `").append(e.getMethodName()).append("`\n");
-        sb.append("Response type: `").append(e.getResponseType()).append("`\n");
-        if (e.isRequiresAuth()) sb.append("⚠ Requires authentication (`@PreAuthorize` or `@Secured`)\n");
+        String rt = e.getResponseType();
+        sb.append("Response type: `").append(rt).append("`");
+        if (rt != null && !rt.contains("ResponseEntity")) {
+            sb.append(" ⚠ plain DTO — HTTP status will be **200** (not 201)");
+        }
+        sb.append("\n");
+        if (e.isRequiresAuth()) {
+            String role = e.getRequiredRole();
+            if (isAdminOnly(role)) {
+                sb.append("⚠ Requires role: ").append(role).append(" — use `\"Bearer \" + adminToken`\n");
+            } else if (role != null) {
+                sb.append("⚠ Requires role: ").append(role).append(" — use `\"Bearer \" + token`\n");
+            } else {
+                sb.append("⚠ Requires authentication — use `\"Bearer \" + token`\n");
+            }
+        }
         if (!e.getPathParams().isEmpty())   { sb.append("Path params:\n");   e.getPathParams().forEach(p -> sb.append(formatParam(p))); }
         if (!e.getQueryParams().isEmpty())  { sb.append("Query params:\n");  e.getQueryParams().forEach(p -> sb.append(formatParam(p))); }
         if (!e.getHeaderParams().isEmpty()) { sb.append("Header params:\n"); e.getHeaderParams().forEach(p -> sb.append(formatParam(p))); }
         if (e.getRequestBody() != null)     sb.append(formatRequestBody(e.getRequestBody()));
+        if (!e.getConsumes().isEmpty())     sb.append("Consumes: ").append(String.join(", ", e.getConsumes())).append("\n");
         if (!e.getProduces().isEmpty())     sb.append("Produces: ").append(String.join(", ", e.getProduces())).append("\n");
+        if (!e.getResponseFields().isEmpty()) {
+            sb.append("Response fields:\n");
+            e.getResponseFields().forEach((name, type) -> sb.append("  - `").append(name).append("`: ").append(type).append("\n"));
+        }
+        if (e.getMethodSource() != null && !e.getMethodSource().isBlank()) {
+            sb.append("Source (first lines):\n```java\n").append(e.getMethodSource()).append("\n```\n");
+        }
         return sb.toString();
     }
 
@@ -216,6 +248,20 @@ public class PromptBuilder {
             body.getFields().forEach((name, type) -> sb.append("  - `").append(name).append("`: ").append(type).append("\n"));
         }
         return sb.toString();
+    }
+
+    /**
+     * Returns true if the required role string implies admin-level access only
+     * (i.e. does NOT also allow regular users). Examples:
+     * "ADMIN" → true, "ADMIN" → true, "USER or ADMIN" → false, "USER" → false.
+     */
+    private boolean isAdminOnly(String role) {
+        if (role == null) return false;
+        String upper = role.toUpperCase();
+        // Admin-only if it contains an admin-like role AND no user-like role
+        boolean hasAdmin = upper.contains("ADMIN") || upper.contains("OWNER") || upper.contains("SUPER");
+        boolean hasUser  = upper.contains("USER")  || upper.contains("MEMBER") || upper.contains("MOD");
+        return hasAdmin && !hasUser;
     }
 
     private String truncate(String text, int maxChars) {

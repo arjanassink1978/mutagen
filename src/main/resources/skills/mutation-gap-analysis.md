@@ -9,6 +9,11 @@ surviving mutants.
 Return ONLY the additional `@Test` methods — no full class, no imports, no explanation.
 Output starts directly with `@Test` and may contain multiple test methods separated by a blank line.
 
+## Admin vs user endpoints — CRITICAL
+The endpoint list marks each endpoint with `(ADMIN only — use adminToken)` or `(auth — use token)`.
+- **`(ADMIN only)`** → always use `.header("Authorization", "Bearer " + adminToken)`.
+- Using the regular `token` for an ADMIN endpoint returns 403 — the controller body is NEVER executed → still NO_COVERAGE.
+
 ## Mutant status: two kinds of problem
 
 **`[SURVIVED]`** — the code WAS executed by a test, but no assertion caught the change.
@@ -33,6 +38,13 @@ Output starts directly with `@Test` and may contain multiple test methods separa
 **Return Values** (return value changed):
 → Assert the exact return value, not just `notNull()`
 → Use `equalTo(expectedValue)` instead of `notNullValue()`
+→ For POST/PUT endpoints: check the **Source** snippet in the endpoint description to determine the status code
+
+**Status codes — always read the Source snippet first:**
+- Source shows `ResponseEntity.status(201)` or `ResponseEntity.created(...)` → `is(201)`
+- Source shows `ResponseEntity.ok(...)` or `ResponseEntity.status(200)` → `is(200)`
+- Source returns a plain DTO (no `ResponseEntity`) → always `is(200)` (Spring default)
+- Source shows `ResponseEntity` but exact status unclear → `anyOf(is(200), is(201))`
 
 **Void Method Calls** (method call removed):
 → Verify the side effect of the method
@@ -58,14 +70,17 @@ For these, use a **setup-then-act** pattern within the same test method:
 @Test
 void mutation_someEndpoint_coversMutatedCode() {
     // Step 1: create the parent resource first and extract its ID
+    // Use UUID-based values for unique fields to avoid conflicts on repeated runs
+    String unique = java.util.UUID.randomUUID().toString().substring(0, 8);
     int resourceId = given()
             .header("Authorization", "Bearer " + token)
-            .contentType(ContentType.JSON)       // only if endpoint uses @RequestBody
-            .body("{\"field\": \"value\"}")       // or .param("field", "value") for @RequestParam
+            // Use .param("field", value) for @RequestParam endpoints
+            // Use .contentType(ContentType.JSON).body("{\"field\": \"value_" + unique + "\"}") for @RequestBody endpoints
+            .param("name", "resource_" + unique)
         .when()
             .post("/api/resource")
         .then()
-            .statusCode(201)
+            .statusCode(anyOf(is(200), is(201)))   // anyOf: plain DTO returns 200, ResponseEntity may return 201
             .extract().path("id");
 
     // Step 2: call the target endpoint with the real ID
@@ -74,7 +89,7 @@ void mutation_someEndpoint_coversMutatedCode() {
         .when()
             .put("/api/resource/" + resourceId + "/action")
         .then()
-            .statusCode(200);
+            .statusCode(anyOf(is(200), is(204)));
 }
 ```
 

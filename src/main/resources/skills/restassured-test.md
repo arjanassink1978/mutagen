@@ -81,6 +81,25 @@ When an endpoint has a request body with a known DTO type and import path (e.g. 
 - Class name ends with `IT` (integration test convention)
 - No `@SpringBootTest`, no `MockMvc`, no Spring context — this is a black-box HTTP test
 
+### Class-level Consumes constraint
+If an endpoint's description includes `Consumes: application/json`, ALL requests to that controller (including GET requests) must include `Content-Type: application/json`. Without it Spring returns 415 before the method is entered.
+```java
+// When Consumes: application/json is listed for an endpoint:
+given()
+    .contentType(ContentType.JSON)   // required even for GET on this controller
+    .header("Authorization", "Bearer " + token)
+    .get("/api/some/path")
+    .then().statusCode(200);
+```
+This is different from the general rule above — if `Consumes` is explicitly listed in the endpoint description, you MUST include `contentType(ContentType.JSON)` even on GET requests.
+
+### Admin vs user endpoints — CRITICAL
+The prompt marks each endpoint with either:
+- `⚠ Requires ADMIN role — use adminToken` → use `.header("Authorization", "Bearer " + adminToken)`
+- `⚠ Requires authentication — use token` → use `.header("Authorization", "Bearer " + token)`
+
+**NEVER use the regular `token` for ADMIN-only endpoints.** A regular user gets 403 from the security layer — the controller method body is never executed, so no coverage or mutations are killed.
+
 ### Authentication
 The tests run against a live backend. If **any** endpoint in the controller is marked "⚠ Requires authentication":
 
@@ -131,14 +150,18 @@ The tests run against a live backend. If **any** endpoint in the controller is m
 ### Scenarios to generate per endpoint
 
 **GET endpoints:**
+⚠ **NEVER set `contentType(ContentType.JSON)` on GET requests.** GET has no body; setting Content-Type causes Spring to return 415 before the method is even entered. Use `given().get(path)` or `given().header("Authorization", ...).get(path)` — no `.contentType()`.
+
 1. Happy path — expect 200 (if no data exists, just check status code, not body size)
 2. Not found — expect 404 (for `/{id}` endpoints, use a non-existent ID like 999999)
 3. Invalid parameter — expect 400 (for `@Min`, `@Max`, type mismatch)
 
-**IMPORTANT for GET endpoints**: Do NOT set `contentType(ContentType.JSON)` on GET requests. GET requests have no body; setting Content-Type is meaningless and causes inconsistent behavior across environments (Spring may return 415 in some JVMs, 200 in others). Just use `given().get(path)` or `given().header("Authorization", ...).get(path)`.
-
 **POST/PUT/PATCH endpoints:**
-1. Happy path — valid body, expect 200 or 201
+1. Happy path — valid body. Determine expected status from the **Source** snippet in the endpoint description:
+   - Source shows `ResponseEntity.status(201)` or `ResponseEntity.created(...)` → `is(201)`
+   - Source shows `ResponseEntity.ok(...)` or `ResponseEntity.status(200)` → `is(200)`
+   - Source returns a **plain DTO** (no `ResponseEntity` in the return statement) → always `is(200)` (Spring defaults to 200)
+   - Source shows `ResponseEntity` but status is unclear → `anyOf(is(200), is(201))`
    - **IMPORTANT**: any field that must be unique in the database (username, email, name, code, slug, etc.) MUST use a UUID-based value to ensure the test is idempotent across repeated runs:
      ```java
      String unique = java.util.UUID.randomUUID().toString().substring(0, 8);
@@ -174,14 +197,17 @@ For these, **create the resource first** within the same test method:
 
 ```java
 @Test
-void likeMessage_existingMessage_returns200() {
-    // Step 1: create parent resource using UUID-based unique data
+void actionOnResource_existingResource_returns200() {
+    // Step 1: create the parent resource using UUID-based unique data
     String unique = java.util.UUID.randomUUID().toString().substring(0, 8);
+
+    // Use .param() for @RequestParam endpoints, or .contentType(ContentType.JSON).body(json) for @RequestBody endpoints
+    // Check the endpoint description to know which style is required
     int resourceId = given()
             .header("Authorization", "Bearer " + token)
-            .param("content", "content_" + unique)   // .param() for query params, .body(json) for request body
+            .param("name", "resource_" + unique)   // example: @RequestParam style
         .when()
-            .post("/api/messages")
+            .post("/api/resources")
         .then()
             .statusCode(anyOf(is(200), is(201)))
             .extract().path("id");
@@ -190,7 +216,7 @@ void likeMessage_existingMessage_returns200() {
     given()
             .header("Authorization", "Bearer " + token)
         .when()
-            .post("/api/messages/" + resourceId + "/like")
+            .post("/api/resources/" + resourceId + "/action")
         .then()
             .statusCode(anyOf(is(200), is(201)));
 }

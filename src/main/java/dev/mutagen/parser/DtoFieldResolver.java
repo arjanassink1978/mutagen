@@ -3,6 +3,7 @@ package dev.mutagen.parser;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import dev.mutagen.model.EndpointInfo;
 import dev.mutagen.model.RequestBodyInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,6 +51,24 @@ public class DtoFieldResolver {
         String fqn = qualifiedNames.get(simpleName);
         if (fqn != null) {
             body.setQualifiedJavaType(fqn);
+        }
+    }
+
+    /**
+     * Enriches an endpoint with the fields of its response DTO (if resolvable).
+     * Strips {@code ResponseEntity<>} wrapper and generic parameters before lookup.
+     */
+    public void enrichResponseType(EndpointInfo endpoint) {
+        if (endpoint.getResponseType() == null) return;
+        String simpleName = extractSimpleName(
+                endpoint.getResponseType()
+                        .replaceAll("ResponseEntity<(.+)>", "$1") // unwrap ResponseEntity
+                        .replaceAll("List<(.+)>", "$1")           // unwrap List
+        );
+        Map<String, String> fields = dtoCache.get(simpleName);
+        if (fields != null && !fields.isEmpty()) {
+            endpoint.setResponseFields(fields);
+            log.debug("Enriched response type '{}' with {} fields for {}", simpleName, fields.size(), endpoint.getFullPath());
         }
     }
 
