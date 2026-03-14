@@ -158,6 +158,7 @@ The tests run against a live backend. If **any** endpoint in the controller is m
 - For body assertions: only assert on responses that don't depend on pre-existing data
 - Use `greaterThanOrEqualTo(0)` for list sizes (empty list is valid)
 - Use `notNullValue()` for ID fields on created resources
+- **NEVER pass a Hamcrest Matcher to `.path()`** — `.path("id", greaterThan(0))` does not compile. To assert use `.then().body("id", greaterThan(0))`. To extract use `.extract().path("id")`.
 
 ### Naming convention
 Pattern: `methodName_scenario_expectedResult()`

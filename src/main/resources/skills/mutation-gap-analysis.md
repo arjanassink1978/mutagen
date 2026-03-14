@@ -97,6 +97,11 @@ Include the `unique` variable in every JSON body that creates a resource:
 
 **Never hardcode** values like `"testuser"` or `"test@example.com"` in setup steps — they will conflict on repeated runs and cause the setup POST to return 500 before the test even starts.
 
+## RestAssured API rules
+- **NEVER pass a Hamcrest Matcher to `.path()`** — `.path("id", greaterThan(0))` does not compile.
+  - To assert: use `.then().body("id", greaterThan(0))`
+  - To extract: use `.extract().path("id")`
+
 ## Critical constraints
 - NEVER reference application classes (entities, DTOs, request/response objects like `Message`, `User`, `LoginRequest`, etc.)
 - Use only RestAssured methods with raw JSON strings or primitive values
