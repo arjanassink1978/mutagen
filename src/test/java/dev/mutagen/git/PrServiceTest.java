@@ -87,7 +87,7 @@ class PrServiceTest {
     // ------------------------------------------------------------------
 
     private MutationLoopResult loopResult() {
-        return new MutationLoopResult(twoTests(), 25.0, 85.0, 2, new MutationReport(), 0);
+        return new MutationLoopResult(twoTests(), 25.0, 85.0, 2, new MutationReport(), 0, 0, 0);
     }
 
     private List<GeneratedTest> twoTests() {

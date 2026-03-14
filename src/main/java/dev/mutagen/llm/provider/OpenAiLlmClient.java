@@ -78,6 +78,9 @@ public class OpenAiLlmClient implements LlmClient {
     public String providerName() { return "openai"; }
 
     private String buildRequestBody(LlmRequest request) throws Exception {
+        // Note: request.isCacheSystemPrompt() is intentionally ignored here.
+        // OpenAI caches prompt prefixes automatically for supported models (gpt-4o, gpt-4.1 etc.)
+        // when the same prefix of 1024+ tokens is reused — no special API parameter is needed.
         ObjectNode body = objectMapper.createObjectNode();
         body.put("model", model);
         body.put("max_tokens", request.getMaxTokens());

@@ -7,31 +7,41 @@ public class LlmRequest {
     private final String userPrompt;
     private final int maxTokens;
     private final float temperature;
+    /**
+     * When true, the provider should apply prompt-caching on the system prompt
+     * (Anthropic: {@code cache_control: {type: "ephemeral"}}).
+     * Ignored by providers that do not support caching.
+     */
+    private final boolean cacheSystemPrompt;
 
     private LlmRequest(Builder builder) {
-        this.systemPrompt = builder.systemPrompt;
-        this.userPrompt   = builder.userPrompt;
-        this.maxTokens    = builder.maxTokens;
-        this.temperature  = builder.temperature;
+        this.systemPrompt      = builder.systemPrompt;
+        this.userPrompt        = builder.userPrompt;
+        this.maxTokens         = builder.maxTokens;
+        this.temperature       = builder.temperature;
+        this.cacheSystemPrompt = builder.cacheSystemPrompt;
     }
 
-    public String getSystemPrompt() { return systemPrompt; }
-    public String getUserPrompt()   { return userPrompt; }
-    public int getMaxTokens()       { return maxTokens; }
-    public float getTemperature()   { return temperature; }
+    public String getSystemPrompt()     { return systemPrompt; }
+    public String getUserPrompt()       { return userPrompt; }
+    public int getMaxTokens()           { return maxTokens; }
+    public float getTemperature()       { return temperature; }
+    public boolean isCacheSystemPrompt(){ return cacheSystemPrompt; }
 
     public static Builder builder() { return new Builder(); }
 
     public static class Builder {
-        private String systemPrompt = "";
+        private String systemPrompt     = "";
         private String userPrompt;
-        private int maxTokens    = 4096;
-        private float temperature = 0.2f;
+        private int maxTokens           = 4096;
+        private float temperature       = 0.2f;
+        private boolean cacheSystemPrompt = false;
 
-        public Builder systemPrompt(String s) { this.systemPrompt = s; return this; }
-        public Builder userPrompt(String s)   { this.userPrompt = s; return this; }
-        public Builder maxTokens(int n)       { this.maxTokens = n; return this; }
-        public Builder temperature(float t)   { this.temperature = t; return this; }
+        public Builder systemPrompt(String s)        { this.systemPrompt = s; return this; }
+        public Builder userPrompt(String s)          { this.userPrompt = s; return this; }
+        public Builder maxTokens(int n)              { this.maxTokens = n; return this; }
+        public Builder temperature(float t)          { this.temperature = t; return this; }
+        public Builder cacheSystemPrompt(boolean b)  { this.cacheSystemPrompt = b; return this; }
 
         public LlmRequest build() {
             if (userPrompt == null || userPrompt.isBlank()) {

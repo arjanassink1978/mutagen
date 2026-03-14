@@ -22,6 +22,12 @@ import static org.hamcrest.Matchers.*;
 Only include `import java.util.Set;` if you actually use `Set` in the test class. Only include `import java.util.List;` if you actually use `List`.
 Do NOT import `io.restassured.RestAssured` or `org.junit.jupiter.api.BeforeAll` unless you have authentication setup (see below).
 
+### Request parameters vs request body
+**CRITICAL**: Check the endpoint definition carefully:
+- If the endpoint shows `query:{field:type}` (or path params) → use `.param("field", value)` or `.queryParam("field", value)`. Do NOT send a JSON body.
+- If the endpoint shows `body: SomeType {field: type}` → use `.contentType(ContentType.JSON).body(json)`
+- Example: `POST /api/messages query:{content:String}` → `.param("content", "hello")`, NOT `.body("{\"content\":\"hello\"}")`
+
 ### Request body: use DTO factory methods, not inline field-filling
 When an endpoint has a request body with a known DTO type and import path (e.g. `LoginRequest (import: io.example.request.LoginRequest)`):
 
@@ -75,6 +81,25 @@ When an endpoint has a request body with a known DTO type and import path (e.g. 
 - Class name ends with `IT` (integration test convention)
 - No `@SpringBootTest`, no `MockMvc`, no Spring context — this is a black-box HTTP test
 
+### Class-level Consumes constraint
+If an endpoint's description includes `Consumes: application/json`, ALL requests to that controller (including GET requests) must include `Content-Type: application/json`. Without it Spring returns 415 before the method is entered.
+```java
+// When Consumes: application/json is listed for an endpoint:
+given()
+    .contentType(ContentType.JSON)   // required even for GET on this controller
+    .header("Authorization", "Bearer " + token)
+    .get("/api/some/path")
+    .then().statusCode(200);
+```
+This is different from the general rule above — if `Consumes` is explicitly listed in the endpoint description, you MUST include `contentType(ContentType.JSON)` even on GET requests.
+
+### Admin vs user endpoints — CRITICAL
+The prompt marks each endpoint with either:
+- `⚠ Requires ADMIN role — use adminToken` → use `.header("Authorization", "Bearer " + adminToken)`
+- `⚠ Requires authentication — use token` → use `.header("Authorization", "Bearer " + token)`
+
+**NEVER use the regular `token` for ADMIN-only endpoints.** A regular user gets 403 from the security layer — the controller method body is never executed, so no coverage or mutations are killed.
+
 ### Authentication
 The tests run against a live backend. If **any** endpoint in the controller is marked "⚠ Requires authentication":
 
@@ -125,14 +150,18 @@ The tests run against a live backend. If **any** endpoint in the controller is m
 ### Scenarios to generate per endpoint
 
 **GET endpoints:**
+⚠ **NEVER set `contentType(ContentType.JSON)` on GET requests.** GET has no body; setting Content-Type causes Spring to return 415 before the method is even entered. Use `given().get(path)` or `given().header("Authorization", ...).get(path)` — no `.contentType()`.
+
 1. Happy path — expect 200 (if no data exists, just check status code, not body size)
 2. Not found — expect 404 (for `/{id}` endpoints, use a non-existent ID like 999999)
 3. Invalid parameter — expect 400 (for `@Min`, `@Max`, type mismatch)
 
-**IMPORTANT for GET endpoints**: Do NOT set `contentType(ContentType.JSON)` on GET requests. GET requests have no body; setting Content-Type is meaningless and causes inconsistent behavior across environments (Spring may return 415 in some JVMs, 200 in others). Just use `given().get(path)` or `given().header("Authorization", ...).get(path)`.
-
 **POST/PUT/PATCH endpoints:**
-1. Happy path — valid body, expect 200 or 201
+1. Happy path — valid body. Determine expected status from the **Source** snippet in the endpoint description:
+   - Source shows `ResponseEntity.status(201)` or `ResponseEntity.created(...)` → `is(201)`
+   - Source shows `ResponseEntity.ok(...)` or `ResponseEntity.status(200)` → `is(200)`
+   - Source returns a **plain DTO** (no `ResponseEntity` in the return statement) → always `is(200)` (Spring defaults to 200)
+   - Source shows `ResponseEntity` but status is unclear → `anyOf(is(200), is(201))`
    - **IMPORTANT**: any field that must be unique in the database (username, email, name, code, slug, etc.) MUST use a UUID-based value to ensure the test is idempotent across repeated runs:
      ```java
      String unique = java.util.UUID.randomUUID().toString().substring(0, 8);
@@ -144,14 +173,15 @@ The tests run against a live backend. If **any** endpoint in the controller is m
 3. Invalid fields — expect 400 (if `@Valid` is present, test a clear constraint violation)
 
 **DELETE endpoints:**
-1. Not found — expect 404 (use a non-existent ID, do NOT test happy-path delete as it requires prior state)
-   Add `.header("Authorization", "Bearer " + token)` if the endpoint requires authentication.
+1. Happy path (if the endpoint has an ID path param) — first create the resource with a POST, extract the ID, then delete it. See "Multi-step tests" below.
+2. Not found — expect 404 using a non-existent ID like 999999.
 
 ### Assertions
 - Always validate the HTTP status code
 - For body assertions: only assert on responses that don't depend on pre-existing data
 - Use `greaterThanOrEqualTo(0)` for list sizes (empty list is valid)
 - Use `notNullValue()` for ID fields on created resources
+- **NEVER pass a Hamcrest Matcher to `.path()`** — `.path("id", greaterThan(0))` does not compile. To assert use `.then().body("id", greaterThan(0))`. To extract use `.extract().path("id")`.
 
 ### Naming convention
 Pattern: `methodName_scenario_expectedResult()`
@@ -160,6 +190,45 @@ Examples:
 - `createUser_invalidEmail_returns400()`
 - `createUser_emptyBody_returns400()`
 
+### Multi-step tests for endpoints that need existing data
+
+Some endpoints operate on an existing resource (endpoints with `/{id}` in the path: like, unlike, reply, delete-by-id, get-by-id, update-by-id).
+For these, **create the resource first** within the same test method:
+
+```java
+@Test
+void actionOnResource_existingResource_returns200() {
+    // Step 1: create the parent resource using UUID-based unique data
+    String unique = java.util.UUID.randomUUID().toString().substring(0, 8);
+
+    // Use .param() for @RequestParam endpoints, or .contentType(ContentType.JSON).body(json) for @RequestBody endpoints
+    // Check the endpoint description to know which style is required
+    int resourceId = given()
+            .header("Authorization", "Bearer " + token)
+            .param("name", "resource_" + unique)   // example: @RequestParam style
+        .when()
+            .post("/api/resources")
+        .then()
+            .statusCode(anyOf(is(200), is(201)))
+            .extract().path("id");
+
+    // Step 2: call the target endpoint with the real ID
+    given()
+            .header("Authorization", "Bearer " + token)
+        .when()
+            .post("/api/resources/" + resourceId + "/action")
+        .then()
+            .statusCode(anyOf(is(200), is(201)));
+}
+```
+
+**Always use UUID-based unique values** in setup steps for fields that must be unique (username, email, content, name, etc.) — never hardcode values that will conflict on repeated runs:
+```java
+String unique = java.util.UUID.randomUUID().toString().substring(0, 8);
+String username = "user_" + unique;
+String email    = "user_" + unique + "@example.com";
+```
+
 ### What you must NOT do
 - No Mockito, no @MockBean, no Spring context
 - No hardcoded ports
@@ -167,9 +236,8 @@ Examples:
 - No `Thread.sleep()`
 - No empty test bodies
 - No System.out.println
-- Do NOT test happy-path GET-by-ID when you cannot guarantee the resource exists
-- Do NOT test happy-path DELETE — it requires prior state that may not exist
-- Do NOT test happy-path nested POST/PUT/PATCH on a parent resource (e.g. `/messages/{id}/reply`, `/messages/{id}/like`) when you cannot guarantee the parent exists. Instead test the not-found case with a non-existent ID like 999999 and expect `anyOf(is(404), is(400))`
+- Do NOT test happy-path GET-by-ID without first creating the resource (use multi-step pattern above)
+- Do NOT hardcode usernames/emails/slugs — always use UUID-based unique values
 
 ## Quality check
 Before returning code, verify internally:

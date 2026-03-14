@@ -152,6 +152,7 @@ public class TestGeneratorService {
 
         LlmRequest request = LlmRequest.builder()
                 .systemPrompt(skill.getContent())
+                .cacheSystemPrompt(true)
                 .userPrompt(prompt)
                 .maxTokens(2048)
                 .temperature(0.1f)
@@ -173,6 +174,7 @@ public class TestGeneratorService {
 
         LlmRequest request = LlmRequest.builder()
                 .systemPrompt(skill.getContent())
+                .cacheSystemPrompt(true)
                 .userPrompt(promptBuilder.buildTestGenerationPrompt(
                         controllerClass, packageName, endpoints, existingTestCode, authContext))
                 .maxTokens(4096)
@@ -204,6 +206,7 @@ public class TestGeneratorService {
         if (packageIndex > 0) trimmed = trimmed.substring(packageIndex);
         trimmed = fixMockMvcAuthCalls(trimmed);
         trimmed = fixHamcrestInMatcher(trimmed);
+        trimmed = fixPathWithMatcher(trimmed);
         trimmed = fixMissingCollectionImports(trimmed);
         return trimmed;
     }
@@ -291,6 +294,20 @@ public class TestGeneratorService {
             }
         }
         return String.join("\n", result);
+    }
+
+    /**
+     * RestAssured's {@code .path(String, String...)} vararg overload does not accept
+     * Hamcrest Matchers. When the LLM writes {@code .extract().path("id", greaterThan(0))}
+     * it causes a compile error. Strip the second argument — the extract is enough to get
+     * the value; assertions should be done with {@code .then().body()} instead.
+     */
+    String fixPathWithMatcher(String code) {
+        // Match .path("someField", <non-string-second-arg>) and strip the second arg.
+        // The second arg starts with a letter (Hamcrest matcher call), not a quote.
+        return code.replaceAll(
+                "\\.path\\(\"([^\"]+)\",\\s*[^\"\\)][^\\)]*\\)",
+                ".path(\"$1\")");
     }
 
     /**

@@ -49,6 +49,7 @@ public class RepoScanner {
             if (endpoint.getRequestBody() != null) {
                 dtoResolver.enrichRequestBody(endpoint.getRequestBody());
             }
+            dtoResolver.enrichResponseType(endpoint);
         });
 
         printSummary(result);

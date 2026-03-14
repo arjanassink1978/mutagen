@@ -9,12 +9,21 @@ surviving mutants.
 Return ONLY the additional `@Test` methods — no full class, no imports, no explanation.
 Output starts directly with `@Test` and may contain multiple test methods separated by a blank line.
 
-## What a surviving mutant means
-A mutant survives when no test fails after the production code is modified at that location.
-This indicates:
-- A boundary condition that is not tested
-- A logical branch that is executed but not verified
-- A return value that is not asserted
+## Admin vs user endpoints — CRITICAL
+The endpoint list marks each endpoint with `(ADMIN only — use adminToken)` or `(auth — use token)`.
+- **`(ADMIN only)`** → always use `.header("Authorization", "Bearer " + adminToken)`.
+- Using the regular `token` for an ADMIN endpoint returns 403 — the controller body is NEVER executed → still NO_COVERAGE.
+
+## Mutant status: two kinds of problem
+
+**`[SURVIVED]`** — the code WAS executed by a test, but no assertion caught the change.
+- Fix: add an assertion that verifies the exact return value, status code, or body field.
+
+**`[NO_COVERAGE]`** — the code was NEVER reached by any test at all.
+- Fix: write a test that calls an API endpoint which exercises this code path.
+- Look at the class and method name in the mutant entry, then use the listed API endpoints to find which HTTP call reaches that class.
+- For example: if `UserService#createUser` has no coverage, the test must call `POST /api/users` (or whatever endpoint delegates to that method).
+- Write the SIMPLEST possible test that reaches the code path — even a test that just checks the status code is enough to give coverage.
 
 ## Approach per mutant type
 
@@ -29,6 +38,13 @@ This indicates:
 **Return Values** (return value changed):
 → Assert the exact return value, not just `notNull()`
 → Use `equalTo(expectedValue)` instead of `notNullValue()`
+→ For POST/PUT endpoints: check the **Source** snippet in the endpoint description to determine the status code
+
+**Status codes — always read the Source snippet first:**
+- Source shows `ResponseEntity.status(201)` or `ResponseEntity.created(...)` → `is(201)`
+- Source shows `ResponseEntity.ok(...)` or `ResponseEntity.status(200)` → `is(200)`
+- Source returns a plain DTO (no `ResponseEntity`) → always `is(200)` (Spring default)
+- Source shows `ResponseEntity` but exact status unclear → `anyOf(is(200), is(201))`
 
 **Void Method Calls** (method call removed):
 → Verify the side effect of the method
@@ -44,9 +60,70 @@ Prefix with `mutation_` to make the intent clear:
 - The test must fail when the mutation is active
 - The test must pass on the original code
 
+## Multi-step tests for endpoints that need existing data
+Some endpoints operate on an existing resource (e.g. update, delete, like, reply — anything with a resource ID in the path).
+If the resource doesn't exist the endpoint returns 404 and the controller method body is never reached — no coverage.
+
+For these, use a **setup-then-act** pattern within the same test method:
+
+```java
+@Test
+void mutation_someEndpoint_coversMutatedCode() {
+    // Step 1: create the parent resource first and extract its ID
+    // Use UUID-based values for unique fields to avoid conflicts on repeated runs
+    String unique = java.util.UUID.randomUUID().toString().substring(0, 8);
+    int resourceId = given()
+            .header("Authorization", "Bearer " + token)
+            // Use .param("field", value) for @RequestParam endpoints
+            // Use .contentType(ContentType.JSON).body("{\"field\": \"value_" + unique + "\"}") for @RequestBody endpoints
+            .param("name", "resource_" + unique)
+        .when()
+            .post("/api/resource")
+        .then()
+            .statusCode(anyOf(is(200), is(201)))   // anyOf: plain DTO returns 200, ResponseEntity may return 201
+            .extract().path("id");
+
+    // Step 2: call the target endpoint with the real ID
+    given()
+            .header("Authorization", "Bearer " + token)
+        .when()
+            .put("/api/resource/" + resourceId + "/action")
+        .then()
+            .statusCode(anyOf(is(200), is(204)));
+}
+```
+
+Always use this pattern when a `[NO_COVERAGE]` mutant is in a method whose path contains a resource ID (`/{id}`, `/{messageId}`, `/{userId}`, etc.).
+
+## Unique test data — CRITICAL
+Resources like users, messages, and posts often require unique fields (username, email, slug, etc.).
+**Always generate unique values** using a UUID snippet so tests never conflict with each other or with seed data:
+
+```java
+String unique = java.util.UUID.randomUUID().toString().substring(0, 8);
+String username = "user_" + unique;
+String email    = "user_" + unique + "@example.com";
+```
+
+Include the `unique` variable in every JSON body that creates a resource:
+```java
+.body("{\"name\": \"Test\", \"username\": \"" + username + "\", \"email\": \"" + email + "\"}")
+```
+
+**Never hardcode** values like `"testuser"` or `"test@example.com"` in setup steps — they will conflict on repeated runs and cause the setup POST to return 500 before the test even starts.
+
+## RestAssured API rules
+- **NEVER pass a Hamcrest Matcher to `.path()`** — `.path("id", greaterThan(0))` does not compile.
+  - To assert: use `.then().body("id", greaterThan(0))`
+  - To extract: use `.extract().path("id")`
+
 ## Critical constraints
 - NEVER reference application classes (entities, DTOs, request/response objects like `Message`, `User`, `LoginRequest`, etc.)
 - Use only RestAssured methods with raw JSON strings or primitive values
 - Use `given().body("{\"field\": \"value\"}")` — never `given().body(new SomeDto(...))`
-- All referenced variables must come from the existing test class (e.g., `token`, `testUsername`, `testPassword`)
+- **Only use variables that exist in AbstractIT**: `token`, `adminToken`, `testUsername`, `testPassword`, `port`. Do NOT invent variables like `testEmail`, `adminEmail`, `testId` — they don't exist and cause compile errors. Use inline values instead:
+  ```java
+  String email = "user_" + java.util.UUID.randomUUID().toString().substring(0, 8) + "@example.com";
+  ```
 - Do NOT set `contentType(ContentType.JSON)` on GET requests — it causes inconsistent behavior across environments
+- Check the endpoint definition: if the endpoint lists `query:{}` params (not a `body:`), use `.param("name", value)` instead of `.body(json)`. For example: `POST /api/messages query:{content:String}` → use `.param("content", "hello")`, NOT `.body("{\"content\":\"hello\"}")`

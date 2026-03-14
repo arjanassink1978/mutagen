@@ -8,12 +8,14 @@ import java.util.List;
 /**
  * The outcome of a {@link MutationLoopService#run} call.
  *
- * @param tests         the (potentially augmented) generated tests after the loop
- * @param initialScore  mutation score before any LLM gap-fill (first pitest run)
- * @param finalScore    mutation score after the last pitest run
- * @param iterationsRun number of pitest runs executed (≥ 1)
- * @param lastReport    the last parsed {@link MutationReport}
- * @param backendPort   the port the backend was running on during the mutation loop
+ * @param tests            the (potentially augmented) generated tests after the loop
+ * @param initialScore     mutation score before any LLM gap-fill (first pitest run)
+ * @param finalScore       mutation score after the last pitest run
+ * @param iterationsRun    number of pitest runs executed (≥ 1)
+ * @param lastReport       the last parsed {@link MutationReport}
+ * @param backendPort      the port the backend was running on during the mutation loop
+ * @param totalInputTokens total LLM input tokens used across all calls in this run
+ * @param totalOutputTokens total LLM output tokens used across all calls in this run
  */
 public record MutationLoopResult(
         List<GeneratedTest> tests,
@@ -21,7 +23,9 @@ public record MutationLoopResult(
         double finalScore,
         int iterationsRun,
         MutationReport lastReport,
-        int backendPort
+        int backendPort,
+        long totalInputTokens,
+        long totalOutputTokens
 ) {
     public boolean thresholdMet(int threshold) {
         return finalScore >= threshold;
