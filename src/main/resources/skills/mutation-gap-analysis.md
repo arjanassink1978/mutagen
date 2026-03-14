@@ -80,6 +80,23 @@ void mutation_someEndpoint_coversMutatedCode() {
 
 Always use this pattern when a `[NO_COVERAGE]` mutant is in a method whose path contains a resource ID (`/{id}`, `/{messageId}`, `/{userId}`, etc.).
 
+## Unique test data — CRITICAL
+Resources like users, messages, and posts often require unique fields (username, email, slug, etc.).
+**Always generate unique values** using a UUID snippet so tests never conflict with each other or with seed data:
+
+```java
+String unique = java.util.UUID.randomUUID().toString().substring(0, 8);
+String username = "user_" + unique;
+String email    = "user_" + unique + "@example.com";
+```
+
+Include the `unique` variable in every JSON body that creates a resource:
+```java
+.body("{\"name\": \"Test\", \"username\": \"" + username + "\", \"email\": \"" + email + "\"}")
+```
+
+**Never hardcode** values like `"testuser"` or `"test@example.com"` in setup steps — they will conflict on repeated runs and cause the setup POST to return 500 before the test even starts.
+
 ## Critical constraints
 - NEVER reference application classes (entities, DTOs, request/response objects like `Message`, `User`, `LoginRequest`, etc.)
 - Use only RestAssured methods with raw JSON strings or primitive values

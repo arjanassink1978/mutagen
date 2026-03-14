@@ -507,7 +507,7 @@ public class MutationLoopService {
                     - If a test expected 200/201 but backend returned 400 → the request body or parameter format is wrong. Two possible fixes:
                       (a) If the endpoint uses `@RequestParam` (query/form params), switch from `.body(json)` to `.param("field", value)` or `.formParam("field", value)` — do NOT send a JSON body
                       (b) If the endpoint uses `@RequestBody`, fix the JSON body fields
-                    - CRITICAL: Never change `.statusCode(201)` to `.statusCode(400)` on a setup step that extracts an ID — if the POST still returns 400, fix the request instead
+                    - CRITICAL: Never change `.statusCode(2xx)` to an error code (4xx/5xx) on a setup step that extracts an ID. If the setup POST returns 500 (e.g. duplicate username/email), fix the request: use a unique value like `"user_" + java.util.UUID.randomUUID().toString().substring(0, 8)` for username/email fields instead of hardcoded values
                     - If backend returns 501 (NOT_IMPLEMENTED) → change `.statusCode(...)` to `anyOf(is(200), is(404), is(501))`
                     - If a test expected 400 but backend returned 404 → change to 404
                     - If a GET request returned 415 → remove `.contentType(ContentType.JSON)` from the GET request (GET + Content-Type causes 415 on some servers)
