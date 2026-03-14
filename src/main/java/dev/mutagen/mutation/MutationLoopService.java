@@ -506,7 +506,7 @@ public class MutationLoopService {
 
             String prompt = """
                     The following RestAssured integration test class has failing tests.
-                    The tests run against a LIVE backend. Fix ONLY the failing assertions based on what the backend actually returns.
+                    The tests run against a LIVE backend. Fix the failing tests so they correctly exercise the API.
 
                     ## Failing tests (with actual backend response)
                     %s
@@ -516,21 +516,32 @@ public class MutationLoopService {
                     %s
                     ```
 
-                    ## Fix rules
-                    - Adjust the `.statusCode(...)` assertion to match what the backend actually returns
-                    - If a test expected 404 but backend returned 403 → expect 403 (authorization issue, not a bug in the test)
-                    - If a test expected 400 but backend returned 500 → expect 500 (backend bug, adjust expectation)
-                    - If a test expected 200/201 but backend returned 400 → the request body or parameter format is wrong. Two possible fixes:
-                      (a) If the endpoint uses `@RequestParam` (query/form params), switch from `.body(json)` to `.param("field", value)` or `.formParam("field", value)` — do NOT send a JSON body
-                      (b) If the endpoint uses `@RequestBody`, fix the JSON body fields
-                    - CRITICAL: Never change `.statusCode(2xx)` to an error code (4xx/5xx) on a setup step that extracts an ID. If the setup POST returns 500 (e.g. duplicate username/email), fix the request: use a unique value like `"user_" + java.util.UUID.randomUUID().toString().substring(0, 8)` for username/email fields instead of hardcoded values
-                    - If backend returns 501 (NOT_IMPLEMENTED) → change `.statusCode(...)` to `anyOf(is(200), is(404), is(501))`
-                    - If a test expected 400 but backend returned 404 → change to 404
-                    - If a GET request returned 415 → remove `.contentType(ContentType.JSON)` from the GET request (GET + Content-Type causes 415 on some servers)
-                    - If the error is `cannot find symbol: method X()` → either add the missing helper method, or inline its logic directly in the test. Do NOT leave a call to a method that is not defined
-                    - If the `Actual` in a failure shows nested objects like `<[SomeClass{field=value}]>` instead of plain strings, navigate to the specific field via JSON path: e.g. change `.body("items", hasItem("foo"))` to `.body("items.name", hasItem("foo"))` (use the actual field name that holds the expected value)
+                    ## Fix rules — PRIORITY ORDER
+
+                    ### 1. Fix the REQUEST first (never accept wrong status codes on happy-path tests)
+                    - CRITICAL: If a happy-path test (method name ends with `_returns200`, `_returns201`, or contains `_happyPath_`, `_validData_`, `_existingMessage_`, `_existingResource_`) expected a 2xx status but got a 4xx/5xx error → **fix the request**, do NOT change the expected status code to an error code
+                      - 415 Unsupported Media Type: add `.contentType(ContentType.JSON)` if request body is JSON; or remove contentType for GET
+                      - 400 Bad Request: check if the JSON body fields are correct (field names, types, enum values)
+                      - 401/403: add or correct the `Authorization` header
+                      - 500 Internal Server Error on setup POST: the username/email is not unique — add UUID: `"user_" + java.util.UUID.randomUUID().toString().substring(0, 8)`
+                    - CRITICAL: Never change `.statusCode(2xx)` to an error code (4xx/5xx) for happy-path tests or setup steps that extract an ID
+
+                    ### 2. Fix body assertions
+                    - If `Actual` shows nested objects like `<[SomeClass{field=value}]>` instead of plain strings → navigate to the specific field via JSON path: e.g. `.body("items.name", hasItem("foo"))`
+                    - Remove body assertions that are clearly wrong (asserting fields that don't exist in the response)
+
+                    ### 3. Only adjust error-code assertions when appropriate
+                    - If a test expected 404 but got 403 → change to 403 (auth issue)
+                    - If a test expected 400 but got 404 → change to 404
+                    - If a GET request returned 415 → remove `.contentType(ContentType.JSON)` from the GET request only (unless the endpoint explicitly requires Content-Type even for GET)
+                    - If a test expected 400 but backend returned 500 → change to 500 (backend bug)
+
+                    ### 4. Compile errors
+                    - If the error is `cannot find symbol: method X()` → add the missing helper method or inline its logic
+                    - If the error is `cannot find symbol: class X` → the class is not accessible; replace with raw JSON string: `.body("{\"field\": \"value\"}")` instead of `.body(new X())`
+
                     - Do NOT change tests that are already passing
-                    - Return the COMPLETE fixed test class (same format: starts with `package`, ends with closing `}` of the class — never truncate)
+                    - Return the COMPLETE fixed test class (starts with `package`, ends with the last `}` of the class — never truncate)
                     """.formatted(failureSummary, test.getSourceCode());
 
             LlmRequest request = LlmRequest.builder()

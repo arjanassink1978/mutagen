@@ -189,6 +189,17 @@ public class PromptBuilder {
             methodNames.forEach(n -> sb.append("  //   ").append(n).append("()\n"));
         }
 
+        // 5. Include first @Test method body as API call pattern example
+        // This shows the gap-fill LLM the exact RestAssured call style (param vs multiPart vs body)
+        java.util.regex.Matcher firstTest = java.util.regex.Pattern
+                .compile("@Test\\s+void\\s+\\w+\\s*\\(\\)[^{]*\\{([\\s\\S]*?)\\n    \\}")
+                .matcher(sourceCode);
+        if (firstTest.find()) {
+            sb.append("  // Example API call pattern from existing test (follow this style):\n");
+            String example = firstTest.group(0).replaceAll("(?m)^", "  ");
+            sb.append(truncate(example, 600)).append("\n");
+        }
+
         return sb.toString().strip();
     }
 
