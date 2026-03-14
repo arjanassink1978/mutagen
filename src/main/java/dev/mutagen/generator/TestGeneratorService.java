@@ -152,6 +152,7 @@ public class TestGeneratorService {
 
         LlmRequest request = LlmRequest.builder()
                 .systemPrompt(skill.getContent())
+                .cacheSystemPrompt(true)
                 .userPrompt(prompt)
                 .maxTokens(2048)
                 .temperature(0.1f)
@@ -173,6 +174,7 @@ public class TestGeneratorService {
 
         LlmRequest request = LlmRequest.builder()
                 .systemPrompt(skill.getContent())
+                .cacheSystemPrompt(true)
                 .userPrompt(promptBuilder.buildTestGenerationPrompt(
                         controllerClass, packageName, endpoints, existingTestCode, authContext))
                 .maxTokens(4096)

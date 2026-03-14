@@ -26,9 +26,10 @@ import java.time.Duration;
 public class AnthropicLlmClient implements LlmClient {
 
     private static final Logger log = LoggerFactory.getLogger(AnthropicLlmClient.class);
-    private static final String DEFAULT_BASE_URL = "https://api.anthropic.com";
-    private static final String DEFAULT_MODEL    = "claude-sonnet-4-20250514";
-    private static final String API_VERSION      = "2023-06-01";
+    private static final String DEFAULT_BASE_URL  = "https://api.anthropic.com";
+    private static final String DEFAULT_MODEL     = "claude-sonnet-4-20250514";
+    private static final String API_VERSION       = "2023-06-01";
+    private static final String BETA_PROMPT_CACHE = "prompt-caching-2024-07-31";
 
     private final String apiKey;
     private final String model;
@@ -57,13 +58,17 @@ public class AnthropicLlmClient implements LlmClient {
             String body = buildRequestBody(request);
             log.debug("Anthropic request: model={}, maxTokens={}", model, request.getMaxTokens());
 
-            HttpRequest httpRequest = HttpRequest.newBuilder()
+            HttpRequest.Builder httpBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + "/v1/messages"))
                     .header("Content-Type", "application/json")
                     .header("x-api-key", apiKey)
                     .header("anthropic-version", API_VERSION)
+                    .timeout(Duration.ofMinutes(3));
+            if (request.isCacheSystemPrompt()) {
+                httpBuilder.header("anthropic-beta", BETA_PROMPT_CACHE);
+            }
+            HttpRequest httpRequest = httpBuilder
                     .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .timeout(Duration.ofMinutes(3))
                     .build();
 
             return parseResponse(httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString()));
@@ -84,7 +89,17 @@ public class AnthropicLlmClient implements LlmClient {
         body.put("model", model);
         body.put("max_tokens", request.getMaxTokens());
         if (!request.getSystemPrompt().isBlank()) {
-            body.put("system", request.getSystemPrompt());
+            if (request.isCacheSystemPrompt()) {
+                // Array format required for cache_control
+                ArrayNode systemArray = body.putArray("system");
+                ObjectNode systemBlock = systemArray.addObject();
+                systemBlock.put("type", "text");
+                systemBlock.put("text", request.getSystemPrompt());
+                ObjectNode cacheControl = systemBlock.putObject("cache_control");
+                cacheControl.put("type", "ephemeral");
+            } else {
+                body.put("system", request.getSystemPrompt());
+            }
         }
         ArrayNode messages = body.putArray("messages");
         ObjectNode userMsg = messages.addObject();

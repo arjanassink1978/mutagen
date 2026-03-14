@@ -82,30 +82,37 @@ public class Main implements Callable<Integer> {
         // BEFORE test generation — this guarantees the LLM gets verified payloads.
         PitestRunner runner = PitestRunner.detect(repoPath);
         MutationLoopService loopService = new MutationLoopService(llmClient, skillLoader, runner);
-        MutationLoopResult loopResult = loopService.run(result, service, null, repoPath, threshold, maxIterations);
+
+        MutationLoopResult loopResult = null;
+        try {
+            loopResult = loopService.run(result, service, null, repoPath, threshold, maxIterations);
+        } finally {
+            // Always clean up the target repo — even if the run threw an exception.
+            // loopService.getLastKnownTests() returns whatever was last written, so we
+            // can remove those files and restore the pom regardless of success/failure.
+            PitestRunner.cleanupInjectedDependencies(repoPath);
+            cleanupInjectedTestFiles(repoPath, loopService.getLastKnownTests());
+        }
 
         if (loopResult.tests().isEmpty()) {
             log.warn("No tests generated — nothing to mutate");
             return 1;
         }
 
-        log.info("Mutation loop done: initial={}, final={}, iterations={}, threshold={}",
+        log.info("Mutation loop done: initial={}, final={}, iterations={}, threshold={}, tokens={} in / {} out (total {})",
                 String.format(Locale.US, "%.1f%%", loopResult.initialScore()),
                 String.format(Locale.US, "%.1f%%", loopResult.finalScore()),
                 loopResult.iterationsRun(),
-                threshold);
+                threshold,
+                loopResult.totalInputTokens(),
+                loopResult.totalOutputTokens(),
+                loopResult.totalInputTokens() + loopResult.totalOutputTokens());
 
         if (loopResult.thresholdMet(threshold)) {
             log.info("Mutation score threshold met!");
         } else {
             log.warn("Mutation score below threshold — writing best effort tests");
         }
-
-        // Clean up injected dependencies from target pom
-        PitestRunner.cleanupInjectedDependencies(repoPath);
-
-        // Remove temporary test files written to the target project during the mutation loop
-        cleanupInjectedTestFiles(repoPath, loopResult.tests());
 
         // Write final tests to separate Maven module
         Path outputDir = outputPath != null ? outputPath : repoPath;

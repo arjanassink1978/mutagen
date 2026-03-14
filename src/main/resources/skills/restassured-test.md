@@ -22,6 +22,12 @@ import static org.hamcrest.Matchers.*;
 Only include `import java.util.Set;` if you actually use `Set` in the test class. Only include `import java.util.List;` if you actually use `List`.
 Do NOT import `io.restassured.RestAssured` or `org.junit.jupiter.api.BeforeAll` unless you have authentication setup (see below).
 
+### Request parameters vs request body
+**CRITICAL**: Check the endpoint definition carefully:
+- If the endpoint shows `query:{field:type}` (or path params) → use `.param("field", value)` or `.queryParam("field", value)`. Do NOT send a JSON body.
+- If the endpoint shows `body: SomeType {field: type}` → use `.contentType(ContentType.JSON).body(json)`
+- Example: `POST /api/messages query:{content:String}` → `.param("content", "hello")`, NOT `.body("{\"content\":\"hello\"}")`
+
 ### Request body: use DTO factory methods, not inline field-filling
 When an endpoint has a request body with a known DTO type and import path (e.g. `LoginRequest (import: io.example.request.LoginRequest)`):
 

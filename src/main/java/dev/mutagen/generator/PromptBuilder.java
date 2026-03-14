@@ -53,27 +53,133 @@ public class PromptBuilder {
     }
 
     public String buildMutationGapPrompt(String existingTestCode, String survivingMutants,
-                                          int mutationScore, int targetScore) {
-        return """
-                ## Current situation
-                Mutation score: %d%% (target: %d%%)
+                                          int mutationScore, int targetScore,
+                                          List<EndpointInfo> endpoints) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("## Current situation\n");
+        sb.append("Mutation score: ").append(mutationScore).append("% (target: ").append(targetScore).append("%)\n\n");
 
-                ## Existing test code
-                ```java
-                %s
-                ```
+        sb.append("## Available API endpoints (use these to write tests)\n");
+        if (endpoints != null && !endpoints.isEmpty()) {
+            endpoints.forEach(e -> sb.append(formatEndpointCompact(e)).append("\n"));
+        } else {
+            sb.append("(see existing test class for examples)\n");
+        }
+        sb.append("\n");
 
-                ## Surviving mutants (Pitest output)
-                ```
-                %s
-                ```
+        sb.append("## Existing test class (summary)\n");
+        sb.append(buildTestClassSummary(existingTestCode)).append("\n\n");
 
-                ## Instruction
-                Write additional @Test methods that kill the surviving mutants above.
-                Return ONLY the extra test methods, not a full class.
-                """.formatted(mutationScore, targetScore,
-                              truncate(existingTestCode, 2000),
-                              truncate(survivingMutants, 1500));
+        sb.append("## Mutants to kill\n");
+        sb.append("Each entry is prefixed with its status:\n");
+        sb.append("- `[SURVIVED]` — the line WAS executed but no test assertion caught the mutation. ");
+        sb.append("Add an assertion that verifies the exact value.\n");
+        sb.append("- `[NO_COVERAGE]` — the line was NEVER executed by any test. ");
+        sb.append("You MUST write a test that calls an API endpoint which triggers this code path.\n\n");
+        sb.append("```\n").append(truncate(survivingMutants, 4000)).append("\n```\n\n");
+
+        sb.append("## Instruction\n");
+        sb.append("Write additional @Test methods that kill the surviving/uncovered mutants above.\n");
+        sb.append("Use the listed API endpoints to reach the mutated code paths.\n");
+        sb.append("For [NO_COVERAGE] mutants in methods that operate on existing resources (like/unlike/reply/delete): ");
+        sb.append("first create the resource with a POST call and extract its ID, then call the target endpoint with that ID.\n");
+        sb.append("Return ONLY the extra test methods, not a full class.\n");
+        return sb.toString();
+    }
+
+    private String formatEndpointCompact(EndpointInfo e) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("- **").append(e.getHttpMethod()).append(" ").append(e.getFullPath()).append("**");
+        if (e.isRequiresAuth()) sb.append(" (auth required)");
+        if (e.getRequestBody() != null) {
+            sb.append(" body: ").append(e.getRequestBody().getJavaType());
+            if (!e.getRequestBody().getFields().isEmpty()) {
+                sb.append(" {");
+                sb.append(String.join(", ", e.getRequestBody().getFields().entrySet().stream()
+                        .map(entry -> entry.getKey() + ": " + entry.getValue())
+                        .toList()));
+                sb.append("}");
+            }
+        }
+        if (!e.getPathParams().isEmpty()) {
+            sb.append(" path:{").append(e.getPathParams().stream()
+                    .map(p -> p.getName() + ":" + p.getJavaType()).collect(java.util.stream.Collectors.joining(",")))
+                    .append("}");
+        }
+        if (!e.getQueryParams().isEmpty()) {
+            sb.append(" query:{").append(e.getQueryParams().stream()
+                    .map(p -> p.getName() + ":" + p.getJavaType()).collect(java.util.stream.Collectors.joining(",")))
+                    .append("}");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Produces a compact summary of a test class for use in the gap-fill prompt.
+     * Includes: class declaration, fields (for variable names), setUp() body,
+     * and a list of existing test method names (so LLM avoids duplicates and
+     * knows what's already covered).
+     */
+    String buildTestClassSummary(String sourceCode) {
+        if (sourceCode == null || sourceCode.isBlank()) return "";
+
+        StringBuilder sb = new StringBuilder();
+
+        // 1. Extract package + class declaration line
+        for (String line : sourceCode.split("\n")) {
+            String t = line.strip();
+            if (t.startsWith("package ") || t.startsWith("public class ") || t.startsWith("class ")) {
+                sb.append(t).append("\n");
+            }
+        }
+
+        // 2. Extract field declarations (lines with private/protected/String/int/long etc. before any @Test)
+        boolean inTestMethod = false;
+        int depth = 0;
+        for (String line : sourceCode.split("\n")) {
+            String t = line.strip();
+            if (t.equals("@Test") || t.startsWith("@Test(")) { inTestMethod = true; }
+            if (inTestMethod) {
+                for (char c : t.toCharArray()) {
+                    if (c == '{') depth++;
+                    else if (c == '}') depth--;
+                }
+                if (depth <= 0) { inTestMethod = false; depth = 0; }
+                continue;
+            }
+            // Field: line that looks like a field declaration (has type + name + ; but no method call)
+            if ((t.startsWith("private ") || t.startsWith("protected ") || t.startsWith("static "))
+                    && t.endsWith(";") && !t.contains("(")) {
+                sb.append("  ").append(t).append("\n");
+            }
+        }
+
+        // 3. Extract setUp() / @BeforeAll method body (contains base URL, auth calls etc.)
+        java.util.regex.Matcher setUp = java.util.regex.Pattern
+                .compile("@BeforeAll[\\s\\S]*?void\\s+\\w+\\s*\\([^)]*\\)[\\s\\S]*?\\{([\\s\\S]*?)\\n    \\}",
+                        java.util.regex.Pattern.DOTALL)
+                .matcher(sourceCode);
+        if (setUp.find()) {
+            sb.append("  @BeforeAll setUp() {\n").append(truncate(setUp.group(1).strip(), 500)).append("\n  }\n");
+        }
+
+        // 4. List existing @Test method names to avoid duplicates
+        java.util.List<String> methodNames = new java.util.ArrayList<>();
+        java.util.regex.Matcher methods = java.util.regex.Pattern
+                .compile("void\\s+(\\w+)\\s*\\(")
+                .matcher(sourceCode);
+        while (methods.find()) {
+            String name = methods.group(1);
+            if (!name.equals("setUp") && !name.startsWith("set") && !name.startsWith("get")) {
+                methodNames.add(name);
+            }
+        }
+        if (!methodNames.isEmpty()) {
+            sb.append("  // Existing test methods (do NOT duplicate these):\n");
+            methodNames.forEach(n -> sb.append("  //   ").append(n).append("()\n"));
+        }
+
+        return sb.toString().strip();
     }
 
     private String formatEndpoint(EndpointInfo e) {

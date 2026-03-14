@@ -39,13 +39,22 @@ public class PitestRunner implements MutationRunner {
         return new PitestRunner(BuildTool.MAVEN);
     }
 
+    /**
+     * Injects RestAssured and Pitest dependencies into the target pom so that
+     * {@code mvn test} (pre-flight) and {@code mvn pitest:mutationCoverage} both compile.
+     * Safe to call multiple times — idempotent due to the marker check.
+     */
+    @Override
+    public void prepareRepo(Path repoPath) throws IOException {
+        installParentProject(repoPath);
+        injectTestDependencies(repoPath);
+    }
+
     @Override
     public Path run(List<GeneratedTest> tests, Path repoPath) throws IOException {
-        // Ensure parent project and dependencies are installed in local Maven repo
-        installParentProject(repoPath);
-
-        // Inject test dependencies (RestAssured, Pitest JUnit5 plugin) into target pom
-        injectTestDependencies(repoPath);
+        // prepareRepo must have been called before run(); call it here too for
+        // the case where run() is invoked directly (idempotent).
+        prepareRepo(repoPath);
 
         List<String> command = buildCommand(tests);
         log.info("Running Pitest: {}", String.join(" ", command));

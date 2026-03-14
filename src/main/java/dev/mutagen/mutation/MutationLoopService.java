@@ -27,7 +27,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 
 /**
  * Orchestrates the mutation testing loop:
@@ -53,6 +55,16 @@ public class MutationLoopService {
     private final MutationReportParser   reportParser;
     private final PromptBuilder          promptBuilder;
     private final BackendStarterFactory  backendFactory;
+
+    /**
+     * Tracks the most recently generated tests across both {@code run()} overloads.
+     * Updated every time {@code current} changes so that callers can read it even
+     * after an exception — e.g. to clean up files that were written to the target repo.
+     */
+    private volatile List<GeneratedTest> lastKnownTests = List.of();
+
+    /** Returns the last list of tests that were generated/modified in the most recent run. */
+    public List<GeneratedTest> getLastKnownTests() { return lastKnownTests; }
 
     public MutationLoopService(LlmClient llmClient,
                                 SkillLoader skillLoader,
@@ -96,6 +108,8 @@ public class MutationLoopService {
         double                initialScore = -1;
         int                   port         = 0;
         List<GeneratedTest>   current      = List.of();
+        AtomicLong            totalIn      = new AtomicLong();
+        AtomicLong            totalOut     = new AtomicLong();
 
         BackendStarter backend = backendFactory.create(repoPath);
         try {
@@ -106,10 +120,13 @@ public class MutationLoopService {
             AuthContext authContext = new AuthAnalyzer().analyze(repoPath);
 
             current = generatorService.generateAll(parseResult, existingTestCode, authContext);
+            lastKnownTests = current;
             if (current.isEmpty()) {
                 log.warn("No tests generated — aborting mutation loop");
-                return new MutationLoopResult(current, 0, 0, 0, null, port);
+                return new MutationLoopResult(current, 0, 0, 0, null, port, 0, 0);
             }
+            // Accumulate tokens from initial test generation
+            current.forEach(t -> { totalIn.addAndGet(t.getInputTokens()); totalOut.addAndGet(t.getOutputTokens()); });
 
             // Stop the external backend before Pitest.
             // The inline tests use @SpringBootTest(RANDOM_PORT), so Spring starts its own
@@ -118,7 +135,12 @@ public class MutationLoopService {
             backend.stop();
             log.info("Backend stopped — @SpringBootTest will start embedded server during Pitest");
 
-            current = validateAndFix(current, repoPath, 0);
+            // Inject test dependencies (RestAssured, Pitest plugin) before mvn test so that
+            // the validateAndFix compile step can find io.restassured on the classpath.
+            mutationRunner.prepareRepo(repoPath);
+
+            current = validateAndFix(current, repoPath, 0, totalIn, totalOut);
+            lastKnownTests = current;
 
             for (int iteration = 1; iteration <= maxIterations; iteration++) {
                 log.info("Mutation loop — iteration {}/{}", iteration, maxIterations);
@@ -137,7 +159,7 @@ public class MutationLoopService {
 
                 if (score >= threshold) {
                     log.info("  Threshold met — stopping");
-                    return new MutationLoopResult(current, initialScore, score, iteration, report, port);
+                    return new MutationLoopResult(current, initialScore, score, iteration, report, port, totalIn.get(), totalOut.get());
                 }
 
                 if (iteration == maxIterations) break;
@@ -149,8 +171,10 @@ public class MutationLoopService {
 
                 log.info("  Asking LLM to fill {} mutant(s) ({} survived, {} no-coverage)...",
                         toFill.size(), survived.size(), Math.min(noCoverage.size(), toFill.size() - survived.size()));
-                current = augmentTests(current, toFill, (int) score, threshold);
-                current = validateAndFix(current, repoPath, port);
+                List<GeneratedTest> beforeAugment = new ArrayList<>(current);
+                current = augmentTests(current, toFill, (int) score, threshold, repoPath, totalIn, totalOut);
+                current = validateAndFix(current, repoPath, port, totalIn, totalOut, beforeAugment);
+                lastKnownTests = current;
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -162,7 +186,7 @@ public class MutationLoopService {
         }
 
         double finalScore = report != null ? report.getMutationScore() : 0;
-        return new MutationLoopResult(current, initialScore, finalScore, maxIterations, report, 0);
+        return new MutationLoopResult(current, initialScore, finalScore, maxIterations, report, 0, totalIn.get(), totalOut.get());
     }
 
     /**
@@ -182,11 +206,18 @@ public class MutationLoopService {
         List<GeneratedTest> current = new ArrayList<>(tests);
         MutationReport report       = null;
         double initialScore         = -1;
+        AtomicLong totalIn          = new AtomicLong();
+        AtomicLong totalOut         = new AtomicLong();
+        // Accumulate tokens from the pre-generated tests passed in
+        tests.forEach(t -> { totalIn.addAndGet(t.getInputTokens()); totalOut.addAndGet(t.getOutputTokens()); });
 
         // This overload has no auth probing — no external backend needed.
         // @SpringBootTest handles the embedded server during Pitest.
         try {
-            current = validateAndFix(current, repoPath, 0);
+            // Inject test dependencies before mvn test so RestAssured is on the classpath.
+            mutationRunner.prepareRepo(repoPath);
+            current = validateAndFix(current, repoPath, 0, totalIn, totalOut);
+            lastKnownTests = current;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("Interrupted during test validation", e);
@@ -209,7 +240,7 @@ public class MutationLoopService {
 
             if (score >= threshold) {
                 log.info("  Threshold met — stopping");
-                return new MutationLoopResult(current, initialScore, score, iteration, report, 0);
+                return new MutationLoopResult(current, initialScore, score, iteration, report, 0, totalIn.get(), totalOut.get());
             }
 
             if (iteration == maxIterations) break;
@@ -221,9 +252,10 @@ public class MutationLoopService {
 
             log.info("  Asking LLM to fill {} mutant(s) ({} survived, {} no-coverage)...",
                     toFill.size(), survived.size(), Math.min(noCoverage.size(), toFill.size() - survived.size()));
-            current = augmentTests(current, toFill, (int) score, threshold);
+            current = augmentTests(current, toFill, (int) score, threshold, repoPath, totalIn, totalOut);
             try {
-                current = validateAndFix(current, repoPath, 0);
+                current = validateAndFix(current, repoPath, 0, totalIn, totalOut);
+                lastKnownTests = current;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException("Interrupted during post-augment validation", e);
@@ -231,7 +263,7 @@ public class MutationLoopService {
         }
 
         double finalScore = report != null ? report.getMutationScore() : 0;
-        return new MutationLoopResult(current, initialScore, finalScore, maxIterations, report, 0);
+        return new MutationLoopResult(current, initialScore, finalScore, maxIterations, report, 0, totalIn.get(), totalOut.get());
     }
 
     // ---------------------------------------------------------------
@@ -242,7 +274,20 @@ public class MutationLoopService {
      * Repeats up to 3 times until all tests pass.
      */
     private List<GeneratedTest> validateAndFix(List<GeneratedTest> tests,
-                                                Path repoPath, int portUnused) throws IOException, InterruptedException {
+                                                Path repoPath, int portUnused,
+                                                AtomicLong totalIn, AtomicLong totalOut) throws IOException, InterruptedException {
+        return validateAndFix(tests, repoPath, portUnused, totalIn, totalOut, null);
+    }
+
+    /**
+     * Runs tests and asks the LLM to fix failures, up to MAX_FIX_ATTEMPTS.
+     * If still failing after all attempts, per-class fallback to {@code fallbackTests} (if provided).
+     * If no fallback, throws IOException.
+     */
+    private List<GeneratedTest> validateAndFix(List<GeneratedTest> tests,
+                                                Path repoPath, int portUnused,
+                                                AtomicLong totalIn, AtomicLong totalOut,
+                                                @Nullable List<GeneratedTest> fallbackTests) throws IOException, InterruptedException {
         if (!repoPath.resolve("pom.xml").toFile().exists()) {
             log.debug("No pom.xml in {} — skipping pre-flight test validation", repoPath);
             writeTestFiles(tests, repoPath, 0);
@@ -262,16 +307,47 @@ public class MutationLoopService {
             log.info("  {} test class(es) failing (fix attempt {}/{})",
                     failures.size(), attempt, MAX_FIX_ATTEMPTS);
             current = stripAbstractITTestMethods(current, failures);
-            current = fixFailingTests(current, failures);
+            current = fixFailingTests(current, failures, totalIn, totalOut);
         }
         writeTestFiles(current, repoPath, 0);
         Map<String, String> remaining = runTestsAndCollectFailures(current, repoPath);
-        if (!remaining.isEmpty()) {
-            throw new IOException(
-                    "Tests still failing after " + MAX_FIX_ATTEMPTS + " fix attempts — aborting. " +
-                    "Failing classes: " + String.join(", ", remaining.keySet()));
+        if (remaining.isEmpty()) return current;
+
+        // Last resort: revert each still-failing class to the pre-augmentation fallback version.
+        // This preserves gap-fill progress for classes that DID fix correctly.
+        if (fallbackTests != null) {
+            List<GeneratedTest> reverted = current.stream().map(test -> {
+                if (!remaining.containsKey(test.getTestClassName())) return test;
+                return fallbackTests.stream()
+                        .filter(f -> f.getTestClassName().equals(test.getTestClassName()))
+                        .findFirst()
+                        .map(f -> {
+                            log.warn("  Reverted {} to pre-augmentation state after {} failed fix attempts",
+                                    test.getTestClassName(), MAX_FIX_ATTEMPTS);
+                            return f;
+                        })
+                        .orElse(test);
+            }).toList();
+            writeTestFiles(reverted, repoPath, 0);
+            Map<String, String> afterRevert = runTestsAndCollectFailures(reverted, repoPath);
+            if (afterRevert.isEmpty()) {
+                log.info("All tests pass after reverting {} class(es) to pre-augmentation state",
+                        remaining.size());
+                return reverted;
+            }
+            // Even the original tests are broken — give up on those classes entirely
+            log.warn("  Pre-augmentation tests also failing for {} — removing those classes",
+                    afterRevert.keySet());
+            List<GeneratedTest> withoutBroken = reverted.stream()
+                    .filter(t -> !afterRevert.containsKey(t.getTestClassName()))
+                    .toList();
+            writeTestFiles(withoutBroken, repoPath, 0);
+            return withoutBroken;
         }
-        return current;
+
+        throw new IOException(
+                "Tests still failing after " + MAX_FIX_ATTEMPTS + " fix attempts — aborting. " +
+                "Failing classes: " + String.join(", ", remaining.keySet()));
     }
 
     /**
@@ -293,7 +369,10 @@ public class MutationLoopService {
             }
         }
 
-        List<String> cmd = List.of("mvn", "test", "-Dtest=" + testClassArg,
+        // Include test-compile explicitly to force a fresh compile even when Maven's
+        // incremental build thinks the .class files are up-to-date (stale .class from a
+        // previous run can hide compile errors that Pitest's own test-compile would catch).
+        List<String> cmd = List.of("mvn", "test-compile", "test", "-Dtest=" + testClassArg,
                 "-DfailIfNoTests=false", "-q");
         log.info("Running tests: {}", String.join(" ", cmd));
 
@@ -308,7 +387,16 @@ public class MutationLoopService {
         if (exitCode == 0) return Map.of();
 
         // Parse Surefire XML reports for failure details
-        return parseSurefireFailures(repoPath, output);
+        Map<String, String> failures = parseSurefireFailures(repoPath, output);
+
+        // If the build failed but no surefire XML files were written (compile error before tests ran),
+        // parseSurefireFailures may return an empty map. Force a compile-error entry in that case
+        // so validateAndFix knows to send the error to the LLM for fixing.
+        if (failures.isEmpty()) {
+            log.debug("Non-zero exit ({}) but no surefire failures parsed — treating as compile error", exitCode);
+            return Map.of("compile-error", truncate(output, 2000));
+        }
+        return failures;
     }
 
     private Map<String, String> parseSurefireFailures(Path repoPath, String mvnOutput) {
@@ -386,7 +474,8 @@ public class MutationLoopService {
      * Asks the LLM to fix each failing test class given the failure summary.
      */
     private List<GeneratedTest> fixFailingTests(List<GeneratedTest> tests,
-                                                  Map<String, String> failures) {
+                                                  Map<String, String> failures,
+                                                  AtomicLong totalIn, AtomicLong totalOut) {
         Skill skill = skillLoader.load(Skill.Type.RESTASSURED_TEST);
         return tests.stream().map(test -> {
             // AbstractIT is infrastructure — never send it to the LLM for fixing
@@ -415,16 +504,22 @@ public class MutationLoopService {
                     - Adjust the `.statusCode(...)` assertion to match what the backend actually returns
                     - If a test expected 404 but backend returned 403 → expect 403 (authorization issue, not a bug in the test)
                     - If a test expected 400 but backend returned 500 → expect 500 (backend bug, adjust expectation)
-                    - If a test expected 200/201 but backend returned 400 → the request body is wrong. Remove any fields that cause 400
+                    - If a test expected 200/201 but backend returned 400 → the request body or parameter format is wrong. Two possible fixes:
+                      (a) If the endpoint uses `@RequestParam` (query/form params), switch from `.body(json)` to `.param("field", value)` or `.formParam("field", value)` — do NOT send a JSON body
+                      (b) If the endpoint uses `@RequestBody`, fix the JSON body fields
+                    - CRITICAL: Never change `.statusCode(201)` to `.statusCode(400)` on a setup step that extracts an ID — if the POST still returns 400, fix the request instead
                     - If backend returns 501 (NOT_IMPLEMENTED) → change `.statusCode(...)` to `anyOf(is(200), is(404), is(501))`
                     - If a test expected 400 but backend returned 404 → change to 404
-                    - If a GET request returned 415 → add `.contentType(ContentType.JSON)` to the request
+                    - If a GET request returned 415 → remove `.contentType(ContentType.JSON)` from the GET request (GET + Content-Type causes 415 on some servers)
+                    - If the error is `cannot find symbol: method X()` → either add the missing helper method, or inline its logic directly in the test. Do NOT leave a call to a method that is not defined
+                    - If the `Actual` in a failure shows nested objects like `<[SomeClass{field=value}]>` instead of plain strings, navigate to the specific field via JSON path: e.g. change `.body("items", hasItem("foo"))` to `.body("items.name", hasItem("foo"))` (use the actual field name that holds the expected value)
                     - Do NOT change tests that are already passing
-                    - Return the complete fixed test class (same format: starts with `package`, ends with `}`)
+                    - Return the COMPLETE fixed test class (same format: starts with `package`, ends with closing `}` of the class — never truncate)
                     """.formatted(failureSummary, test.getSourceCode());
 
             LlmRequest request = LlmRequest.builder()
                     .systemPrompt(skill.getContent())
+                    .cacheSystemPrompt(true)
                     .userPrompt(prompt)
                     .maxTokens(4096)
                     .temperature(0.1f)
@@ -432,6 +527,8 @@ public class MutationLoopService {
 
             try {
                 LlmResponse response = llmClient.complete(request);
+                totalIn.addAndGet(response.getInputTokens());
+                totalOut.addAndGet(response.getOutputTokens());
                 String fixed = sanitizeOutput(response.getContent());
                 log.info("  Fixed: {}", test.getTestClassName());
                 return test.withSourceCode(fixed);
@@ -465,7 +562,9 @@ public class MutationLoopService {
     private List<GeneratedTest> augmentTests(List<GeneratedTest> tests,
                                               List<Mutant> survived,
                                               int currentScore,
-                                              int targetScore) {
+                                              int targetScore,
+                                              Path repoPath,
+                                              AtomicLong totalIn, AtomicLong totalOut) {
         Skill skill = skillLoader.load(Skill.Type.MUTATION_GAP_ANALYSIS);
 
         return tests.stream().map(test -> {
@@ -476,19 +575,25 @@ public class MutationLoopService {
                     .filter(m -> isRelevant(m, test))
                     .toList();
 
-            if (relevant.isEmpty()) return test;
+            if (relevant.isEmpty()) {
+                log.debug("  No relevant mutants for {} (pkg={})", test.getTestClassName(), test.getPackageName());
+                return test;
+            }
 
-            String survivingText = formatMutants(relevant);
+            String survivingText = formatMutants(relevant, repoPath);
             LlmRequest request = LlmRequest.builder()
                     .systemPrompt(skill.getContent())
+                    .cacheSystemPrompt(true)
                     .userPrompt(promptBuilder.buildMutationGapPrompt(
-                            test.getSourceCode(), survivingText, currentScore, targetScore))
-                    .maxTokens(2048)
+                            test.getSourceCode(), survivingText, currentScore, targetScore, test.getEndpoints()))
+                    .maxTokens(4096)
                     .temperature(0.1f)
                     .build();
 
             try {
                 LlmResponse response = llmClient.complete(request);
+                totalIn.addAndGet(response.getInputTokens());
+                totalOut.addAndGet(response.getOutputTokens());
                 String extraMethods  = response.getContent().strip();
                 int added = countTestMethods(extraMethods);
                 log.info("  + {} @Test method(s) added for {}", added, test.getTestClassName());
@@ -521,34 +626,95 @@ public class MutationLoopService {
      */
     /**
      * Combines survived and no-coverage mutants for the gap-fill prompt.
-     * Survived mutants are always included; no-coverage mutants are capped at 20
-     * per iteration to keep the LLM prompt manageable.
+     * Survived mutants are always included; no-coverage mutants fill up to a total of 40.
      */
     private List<Mutant> combineMutants(List<Mutant> survived, List<Mutant> noCoverage) {
         List<Mutant> result = new java.util.ArrayList<>(survived);
-        int cap = Math.max(0, 20 - survived.size());
-        result.addAll(noCoverage.stream().limit(cap).toList());
+        int cap = Math.max(0, 80 - survived.size());
+        // Sort no-coverage mutants: group by class so the LLM gets clustered context,
+        // making it easier to write one test that covers multiple mutants in the same class.
+        List<Mutant> sortedNoCoverage = noCoverage.stream()
+                .sorted(java.util.Comparator.comparing(m -> m.getMutatedClass() != null ? m.getMutatedClass() : ""))
+                .toList();
+        result.addAll(sortedNoCoverage.stream().limit(cap).toList());
         return result;
     }
 
+    /**
+     * A mutant is "relevant" to a test if they share a common root package of at least 2 segments.
+     * This ensures mutants in {@code com.example.service} are matched to tests in
+     * {@code com.example.controller} (both share {@code com.example}).
+     */
     private boolean isRelevant(Mutant mutant, GeneratedTest test) {
         if (mutant.getMutatedClass() == null) return false;
         String mutantPkg = mutant.getMutatedClass().contains(".")
                 ? mutant.getMutatedClass().substring(0, mutant.getMutatedClass().lastIndexOf('.'))
                 : mutant.getMutatedClass();
-        return mutantPkg.startsWith(test.getPackageName())
-                || test.getPackageName().startsWith(mutantPkg);
+        String testPkg = test.getPackageName();
+        // Exact prefix match (original behaviour)
+        if (mutantPkg.startsWith(testPkg) || testPkg.startsWith(mutantPkg)) return true;
+        // Shared root: compare up to min(2, depth) package segments
+        String mutantRoot = rootPackage(mutantPkg, 3);
+        String testRoot   = rootPackage(testPkg, 3);
+        return !mutantRoot.isEmpty() && mutantRoot.equals(testRoot);
     }
 
-    private String formatMutants(List<Mutant> mutants) {
+    /** Returns the first {@code depth} segments of a package name, e.g. "com.example.foo" → "com.example" (depth=2). */
+    private String rootPackage(String pkg, int depth) {
+        String[] parts = pkg.split("\\.");
+        if (parts.length <= depth) return pkg;
+        StringBuilder sb = new StringBuilder(parts[0]);
+        for (int i = 1; i < depth; i++) sb.append('.').append(parts[i]);
+        return sb.toString();
+    }
+
+    private String formatMutants(List<Mutant> mutants, Path repoPath) {
         return mutants.stream()
-                .map(m -> "[%s] %s#%s line %d — %s".formatted(
-                        m.getMutatorShortName(),
-                        m.getMutatedClass(),
-                        m.getMutatedMethod(),
-                        m.getLineNumber(),
-                        m.getDescription()))
+                .map(m -> formatMutant(m, repoPath))
                 .collect(Collectors.joining("\n"));
+    }
+
+    private String formatMutant(Mutant m, Path repoPath) {
+        String statusTag = m.getStatusEnum() == Mutant.Status.NO_COVERAGE ? "NO_COVERAGE" : "SURVIVED";
+        String header = "[%s][%s] %s#%s line %d — %s".formatted(
+                statusTag,
+                m.getMutatorShortName(),
+                m.getMutatedClass(),
+                m.getMutatedMethod(),
+                m.getLineNumber(),
+                m.getDescription());
+        String snippet = readSourceSnippet(m, repoPath);
+        return snippet.isBlank() ? header : header + "\n  Code: " + snippet;
+    }
+
+    /**
+     * Reads a few lines of source code around the mutant's line number from the target project,
+     * giving the LLM concrete context about what expression was mutated.
+     */
+    private String readSourceSnippet(Mutant m, Path repoPath) {
+        if (m.getMutatedClass() == null || m.getLineNumber() <= 0) return "";
+        // Derive source path: com.example.Foo → src/main/java/com/example/Foo.java
+        String relativePath = "src/main/java/"
+                + m.getMutatedClass().replace('.', '/') + ".java";
+        Path sourceFile = repoPath.resolve(relativePath);
+        if (!Files.exists(sourceFile)) return "";
+        try {
+            List<String> lines = Files.readAllLines(sourceFile);
+            int target = m.getLineNumber() - 1; // 0-based
+            if (target < 0 || target >= lines.size()) return "";
+            // Show 1 line before + the mutated line + 1 line after for context
+            int from = Math.max(0, target - 1);
+            int to   = Math.min(lines.size() - 1, target + 1);
+            StringBuilder sb = new StringBuilder();
+            for (int i = from; i <= to; i++) {
+                String marker = (i == target) ? " >> " : "    ";
+                sb.append(marker).append(lines.get(i).strip());
+                if (i < to) sb.append(" | ");
+            }
+            return sb.toString();
+        } catch (IOException e) {
+            return "";
+        }
     }
 
     // Visible for testing

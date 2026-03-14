@@ -9,12 +9,16 @@ surviving mutants.
 Return ONLY the additional `@Test` methods — no full class, no imports, no explanation.
 Output starts directly with `@Test` and may contain multiple test methods separated by a blank line.
 
-## What a surviving mutant means
-A mutant survives when no test fails after the production code is modified at that location.
-This indicates:
-- A boundary condition that is not tested
-- A logical branch that is executed but not verified
-- A return value that is not asserted
+## Mutant status: two kinds of problem
+
+**`[SURVIVED]`** — the code WAS executed by a test, but no assertion caught the change.
+- Fix: add an assertion that verifies the exact return value, status code, or body field.
+
+**`[NO_COVERAGE]`** — the code was NEVER reached by any test at all.
+- Fix: write a test that calls an API endpoint which exercises this code path.
+- Look at the class and method name in the mutant entry, then use the listed API endpoints to find which HTTP call reaches that class.
+- For example: if `UserService#createUser` has no coverage, the test must call `POST /api/users` (or whatever endpoint delegates to that method).
+- Write the SIMPLEST possible test that reaches the code path — even a test that just checks the status code is enough to give coverage.
 
 ## Approach per mutant type
 
@@ -44,9 +48,42 @@ Prefix with `mutation_` to make the intent clear:
 - The test must fail when the mutation is active
 - The test must pass on the original code
 
+## Multi-step tests for endpoints that need existing data
+Some endpoints operate on an existing resource (e.g. update, delete, like, reply — anything with a resource ID in the path).
+If the resource doesn't exist the endpoint returns 404 and the controller method body is never reached — no coverage.
+
+For these, use a **setup-then-act** pattern within the same test method:
+
+```java
+@Test
+void mutation_someEndpoint_coversMutatedCode() {
+    // Step 1: create the parent resource first and extract its ID
+    int resourceId = given()
+            .header("Authorization", "Bearer " + token)
+            .contentType(ContentType.JSON)       // only if endpoint uses @RequestBody
+            .body("{\"field\": \"value\"}")       // or .param("field", "value") for @RequestParam
+        .when()
+            .post("/api/resource")
+        .then()
+            .statusCode(201)
+            .extract().path("id");
+
+    // Step 2: call the target endpoint with the real ID
+    given()
+            .header("Authorization", "Bearer " + token)
+        .when()
+            .put("/api/resource/" + resourceId + "/action")
+        .then()
+            .statusCode(200);
+}
+```
+
+Always use this pattern when a `[NO_COVERAGE]` mutant is in a method whose path contains a resource ID (`/{id}`, `/{messageId}`, `/{userId}`, etc.).
+
 ## Critical constraints
 - NEVER reference application classes (entities, DTOs, request/response objects like `Message`, `User`, `LoginRequest`, etc.)
 - Use only RestAssured methods with raw JSON strings or primitive values
 - Use `given().body("{\"field\": \"value\"}")` — never `given().body(new SomeDto(...))`
 - All referenced variables must come from the existing test class (e.g., `token`, `testUsername`, `testPassword`)
 - Do NOT set `contentType(ContentType.JSON)` on GET requests — it causes inconsistent behavior across environments
+- Check the endpoint definition: if the endpoint lists `query:{}` params (not a `body:`), use `.param("name", value)` instead of `.body(json)`. For example: `POST /api/messages query:{content:String}` → use `.param("content", "hello")`, NOT `.body("{\"content\":\"hello\"}")`
