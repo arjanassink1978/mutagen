@@ -349,6 +349,18 @@ public class MutationLoopService {
                     .filter(t -> !afterRevert.containsKey(t.getTestClassName()))
                     .toList();
             writeTestFiles(withoutBroken, repoPath, 0);
+            // CRITICAL: delete the stale test files for removed classes — if we only write
+            // the non-broken classes the old files remain on disk and cause compile errors in Pitest
+            reverted.stream()
+                    .filter(t -> afterRevert.containsKey(t.getTestClassName()))
+                    .forEach(t -> {
+                        try {
+                            Files.deleteIfExists(repoPath.resolve(t.getRelativeFilePath()));
+                            log.info("  Deleted stale test file: {}", t.getRelativeFilePath());
+                        } catch (IOException e) {
+                            log.warn("  Could not delete stale test file {}: {}", t.getRelativeFilePath(), e.getMessage());
+                        }
+                    });
             return withoutBroken;
         }
 
@@ -539,6 +551,7 @@ public class MutationLoopService {
                     ### 4. Compile errors
                     - If the error is `cannot find symbol: method X()` → add the missing helper method or inline its logic
                     - If the error is `cannot find symbol: class X` → the class is not accessible; replace with raw JSON string: `.body("{\"field\": \"value\"}")` instead of `.body(new X())`
+                    - If the error is `cannot find symbol: variable X` → the variable does not exist. Available variables from AbstractIT are: `token`, `adminToken`, `testUsername`, `testPassword`, `port`. Replace `X` with an inline value (String literal or UUID expression), e.g. replace `testEmail` with `"user_" + java.util.UUID.randomUUID().toString().substring(0,8) + "@example.com"`
 
                     - Do NOT change tests that are already passing
                     - Return the COMPLETE fixed test class (starts with `package`, ends with the last `}` of the class — never truncate)

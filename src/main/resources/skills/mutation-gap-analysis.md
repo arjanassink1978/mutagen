@@ -121,6 +121,9 @@ Include the `unique` variable in every JSON body that creates a resource:
 - NEVER reference application classes (entities, DTOs, request/response objects like `Message`, `User`, `LoginRequest`, etc.)
 - Use only RestAssured methods with raw JSON strings or primitive values
 - Use `given().body("{\"field\": \"value\"}")` — never `given().body(new SomeDto(...))`
-- All referenced variables must come from the existing test class (e.g., `token`, `testUsername`, `testPassword`)
+- **Only use variables that exist in AbstractIT**: `token`, `adminToken`, `testUsername`, `testPassword`, `port`. Do NOT invent variables like `testEmail`, `adminEmail`, `testId` — they don't exist and cause compile errors. Use inline values instead:
+  ```java
+  String email = "user_" + java.util.UUID.randomUUID().toString().substring(0, 8) + "@example.com";
+  ```
 - Do NOT set `contentType(ContentType.JSON)` on GET requests — it causes inconsistent behavior across environments
 - Check the endpoint definition: if the endpoint lists `query:{}` params (not a `body:`), use `.param("name", value)` instead of `.body(json)`. For example: `POST /api/messages query:{content:String}` → use `.param("content", "hello")`, NOT `.body("{\"content\":\"hello\"}")`
